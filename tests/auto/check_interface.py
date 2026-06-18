@@ -101,13 +101,29 @@ try:
         ".then(g=>g.points[0].place||'').catch(()=>'')") or ""
     # (async; re-read synchronously instead)
 
-    # toggle roughness off and on
-    drv.execute_script("document.getElementById('roughness').click();")
+    # land-effect selector: none / roughness / kd
+    def set_land(v):
+        drv.execute_script(
+            "const e=document.getElementById('landEffect');e.value=arguments[0];"
+            "e.dispatchEvent(new Event('change'));", v)
+        time.sleep(0.5)
+        return drv.find_element(By.ID, "info").text
+    drv.execute_script("document.getElementById('model').value='holland';"
+                       "document.getElementById('model').dispatchEvent(new Event('change'));")
     time.sleep(0.4)
-    rough_off = drv.find_element(By.ID, "info").text
-    drv.execute_script("document.getElementById('roughness').click();")
-    time.sleep(0.4)
-    print("=== ROUGHNESS OFF INFO ==="); print(rough_off)
+    print("=== LAND EFFECT (Holland cat1) ===")
+    print("none:     ", set_land("none"))
+    print("roughness:", set_land("roughness"))
+    print("kd:       ", set_land("kd"))
+    # Powell + K&D should show the pending note (powell_kd.json not built yet)
+    drv.execute_script("document.getElementById('model').value='powell';"
+                       "document.getElementById('model').dispatchEvent(new Event('change'));")
+    time.sleep(0.5)
+    print("powell+kd:", drv.find_element(By.ID, "info").text)
+    set_land("roughness")
+    drv.execute_script("document.getElementById('model').value='holland';"
+                       "document.getElementById('model').dispatchEvent(new Event('change'));")
+    time.sleep(0.3)
 
     # Sensitivity / Uncertainty analysis
     drv.execute_script("""
@@ -147,8 +163,8 @@ try:
     print("=== CONSOLE LOGS ===")
     errors = 0
     for entry in drv.get_log("browser"):
-        if "favicon.ico" in entry["message"]:
-            continue  # harmless
+        if "favicon.ico" in entry["message"] or "powell_kd.json" in entry["message"]:
+            continue  # harmless / not built until after the UA run
         print(f"[{entry['level']}] {entry['message']}")
         if entry["level"] == "SEVERE":
             errors += 1

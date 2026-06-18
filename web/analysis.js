@@ -56,6 +56,7 @@ function computeSRC(model) {
     // build input columns + output y (mean land peak wind)
     const cols = SA_VARS.map(v => recs.map(r => r[v]));
     const y = recs.map((_, i) => landMeanWind(computeWindFor(model, cat, i)));
+    if (y.some(v => v == null)) return null;   // e.g. Powell K&D precompute pending
     // correlation matrix R (nv x nv) and r (input vs output)
     const R = cols.map(ci => cols.map(cj => corr(ci, cj)));
     const r = cols.map(ci => corr(ci, y));
@@ -73,10 +74,10 @@ let zTop = 1000;
 
 function getData() {
   const model = document.getElementById("model").value;
-  const rough = document.getElementById("roughness").checked;
+  const land = document.getElementById("landEffect").value;
   if (!analysisState.cache || analysisState.cache.model !== model ||
-      analysisState.cache.rough !== rough) {
-    analysisState.cache = { model, rough, data: computeSRC(model) };
+      analysisState.cache.land !== land) {
+    analysisState.cache = { model, land, data: computeSRC(model) };
   }
   return analysisState.cache;
 }
@@ -140,6 +141,13 @@ function drawChart(mode) {
   const p = panels[mode];
   if (!p || p.el.style.display === "none") return;
   const data = getData().data;
+  if (!data) {
+    p.title.textContent = mode === "epr" ? "Uncertainty — EPR" : "Sensitivity — SRC";
+    p.body.innerHTML = "<p class='note'>Powell Kaplan–DeMaria field: exact precompute " +
+      "scheduled after the UA run. Switch land effect to None/Roughness, or use " +
+      "Holland/Willoughby, to run the analysis now.</p>";
+    return;
+  }
   const isEPR = mode === "epr";
   const cats = [1, 3, 5];
 
@@ -193,15 +201,15 @@ function drawChart(mode) {
   p.body.innerHTML =
     svg + `<div class="legend2">${legend}</div>` +
     `<p class="note">${analysisState.cache.model} · metric: mean peak wind over 682 land pts` +
-    `${analysisState.cache.rough ? " (roughness on)" : ""}<br>${r2}` +
+    ` · land effect: ${analysisState.cache.land}<br>${r2}` +
     (isEPR ? "<br>EPR ≈ SRC² (variance share)" : "") + "</p>";
 }
 
 function setupAnalysis() {
   document.getElementById("btnSRC").addEventListener("click", () => openPanel("src"));
   document.getElementById("btnEPR").addEventListener("click", () => openPanel("epr"));
-  // invalidate cache when the model or roughness changes; redraw open panels
-  ["model", "roughness"].forEach(id =>
+  // invalidate cache when the model or land effect changes; redraw open panels
+  ["model", "landEffect"].forEach(id =>
     document.getElementById(id).addEventListener("change", () => {
       analysisState.cache = null;
       Object.keys(panels).forEach(mode => {

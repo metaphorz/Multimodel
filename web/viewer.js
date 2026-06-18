@@ -4,6 +4,7 @@ const state = {
   grid: null,
   inputs: null,
   powell: null,
+  powellKd: null,         // Powell Kaplan–DeMaria decayed peaks (after UA run)
   roughness: null,        // per-point marine->land multiplier
   map: null,
   markers: [],            // circleMarker per grid point, in grid.json order
@@ -113,18 +114,32 @@ function currentSelection() {
 }
 
 // per-point peak wind (mph) for any (model, category, vector index),
-// respecting the current surface-roughness toggle. cat = "cat1|cat3|cat5".
+// respecting the current land-effect selector. cat = "cat1|cat3|cat5".
+// Returns the string "kd-pending" if Powell K&D is selected but not yet precomputed.
 function computeWindFor(model, cat, vIdx) {
-  let wind;
+  const land = document.getElementById("landEffect").value;
+  const rec = state.inputs ? state.inputs[cat][vIdx] : null;
+
   if (model === "powell") {
+    if (land === "kd") {
+      if (!state.powellKd || !state.powellKd[cat]) return "kd-pending";
+      return state.powellKd[cat][vIdx];
+    }
     if (!state.powell || !state.powell[cat]) return null;
-    wind = state.powell[cat][vIdx];
-  } else {
-    const rec = state.inputs ? state.inputs[cat][vIdx] : null;
-    if (!rec) return null;
-    wind = computeLiveWind(model, rec, quantileToB(rec.WSP), state.grid.points);
+    let wind = state.powell[cat][vIdx];
+    if (land === "roughness" && state.roughness) {
+      const f = state.roughness.factors;
+      wind = Array.from(wind, (w, i) => w * f[i]);
+    }
+    return wind;
   }
-  if (document.getElementById("roughness").checked && state.roughness) {
+
+  // live Holland / Willoughby
+  if (!rec) return null;
+  const B = quantileToB(rec.WSP);
+  if (land === "kd") return computeLiveWindKD(model, rec, B, state.grid.points);
+  let wind = computeLiveWind(model, rec, B, state.grid.points);
+  if (land === "roughness" && state.roughness) {
     const f = state.roughness.factors;
     wind = Array.from(wind, (w, i) => w * f[i]);
   }
@@ -138,7 +153,7 @@ function computeWind() {
 
 // mean peak wind over land vertices — the SA/UA output metric
 function landMeanWind(wind) {
-  if (!wind) return null;
+  if (!wind || typeof wind === "string") return null;   // null or "kd-pending"
   let s = 0, n = 0;
   state.grid.points.forEach((p, i) => { if (p.land) { s += wind[i]; n++; } });
   return n ? s / n : null;
@@ -241,7 +256,9 @@ function updateField() {
   const { model, rec } = currentSelection();
   renderLegend(colorBy);
 
-  const wind = colorBy === "wind" ? computeWind() : null;
+  let wind = colorBy === "wind" ? computeWind() : null;
+  const kdPending = wind === "kd-pending";
+  if (kdPending) wind = null;
   state.wind = wind;
 
   const showWater = document.getElementById("showWater").checked;
@@ -281,6 +298,8 @@ function updateField() {
       `${currentSelection().cat.toUpperCase()} v${document.getElementById("vector").value}<br>` +
       `Peak wind <b>${wmax.toFixed(1)} mph</b> &middot; ` +
       `land mean ${n ? (wsum / n).toFixed(1) : "–"} mph`;
+  } else if (colorBy === "wind" && kdPending) {
+    info.textContent = "Powell Kaplan–DeMaria field: exact precompute scheduled after the UA run.";
   } else if (colorBy === "wind") {
     info.textContent = "Powell field not loaded yet…";
   } else {
@@ -304,7 +323,7 @@ function wireControls() {
 
   document.getElementById("showWater").addEventListener("change", updateField);
   document.getElementById("showGrid").addEventListener("change", updateField);
-  document.getElementById("roughness").addEventListener("change", updateField);
+  document.getElementById("landEffect").addEventListener("change", updateField);
   document.getElementById("theme").addEventListener("change", e => applyTheme(e.target.value));
   document.getElementById("showTrack").addEventListener("change", e => {
     if (e.target.checked) state.layers.track.addTo(state.map);
@@ -322,6 +341,8 @@ async function init() {
     state.inputs = await (await fetch("../outputs/web/inputs.json")).json();
     try { state.roughness = await (await fetch("../outputs/web/roughness.json")).json(); }
     catch (e) { state.roughness = null; }
+    try { state.powellKd = await (await fetch("../outputs/web/powell_kd.json")).json(); }
+    catch (e) { state.powellKd = null; }   // generated after the UA run
     buildMap();
     setupHover();
     setupAnalysis();

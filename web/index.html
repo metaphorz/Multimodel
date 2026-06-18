@@ -60,8 +60,12 @@
     </section>
 
     <section>
-      <h2>Surface</h2>
-      <label><input type="checkbox" id="roughness" checked /> Surface roughness (terrain)</label>
+      <h2>Land effect</h2>
+      <select id="landEffect">
+        <option value="none">None (marine)</option>
+        <option value="roughness" selected>Surface roughness (terrain)</option>
+        <option value="kd">Kaplan&ndash;DeMaria decay</option>
+      </select>
     </section>
 
     <section>

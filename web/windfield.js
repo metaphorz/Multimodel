@@ -18,6 +18,44 @@ function coriolis(latDeg) {
   return 2 * PHYS.OMEGA * Math.sin(latDeg * Math.PI / 180);
 }
 
+// Kaplan & DeMaria (1995) inland decay + gentle Gulf recovery
+// (constants MUST match pipeline/windfield_grid.py)
+const KD = { ALPHA: 0.095, R: 0.90, VB: 30.7, ALPHA_REC: 0.05 };
+
+// storm-track land mask: is the centre over land at E-W position ewc (miles)?
+// built once from the N-S=0 grid row (nearest column).
+let _trackRow = null;
+function trackIsLand(ewc, pts) {
+  if (!_trackRow) {
+    _trackRow = pts.filter(p => p.ns === 0).sort((a, b) => a.ew - b.ew);
+  }
+  if (ewc < _trackRow[0].ew || ewc > _trackRow[_trackRow.length - 1].ew) return false;
+  let best = _trackRow[0], bd = Infinity;
+  for (const p of _trackRow) {
+    const d = Math.abs(p.ew - ewc);
+    if (d < bd) { bd = d; best = p; }
+  }
+  return best.land;
+}
+
+// per-time intensity ratio s(t)=V(t)/V0 (decay over land, recover over Gulf)
+function intensitySchedule(V0, vt, pts) {
+  const nT = Math.round(PHYS.T_MAX / PHYS.T_DT);
+  const s = new Float64Array(nT + 1);
+  let V = V0, made = false;
+  for (let i = 0; i <= nT; i++) {
+    const land = trackIsLand(vt * i * PHYS.T_DT, pts);
+    if (land) {
+      if (!made) { V *= KD.R; made = true; }          // one-time coastal drop
+      V = KD.VB + (V - KD.VB) * Math.exp(-KD.ALPHA * PHYS.T_DT);
+    } else if (made) {
+      V = V0 - (V0 - V) * Math.exp(-KD.ALPHA_REC * PHYS.T_DT);  // Gulf recovery
+    }
+    s[i] = V / V0;
+  }
+  return s;
+}
+
 // inflow angle (radians) — matches inflow_angle_rad() in the Python model
 function inflowAngle(rm, RmaxM) {
   const s = rm / RmaxM;
@@ -63,7 +101,7 @@ function cfEffective(rMiles, RmaxMiles, cfBase) {
    rec:   { CP, Rmax(mi), VT(mph), CF, FFP, ... }
    B:     Holland shape parameter (from WSP quantile)
    pts:   grid points array (ordered like grid.json)            */
-function computeLiveWind(model, rec, B, pts) {
+function computeLiveWind(model, rec, B, pts, sched) {
   const dpPa = (rec.FFP - rec.CP) * 100;
   const RmaxMiles = rec.Rmax;
   const RmaxM = RmaxMiles * PHYS.MILE_M;
@@ -73,10 +111,10 @@ function computeLiveWind(model, rec, B, pts) {
   const cx = cMs * Math.sin(th), cy = cMs * Math.cos(th);  // due west: (-c, 0)
 
   const out = new Float32Array(pts.length);
+  const nT = Math.round(PHYS.T_MAX / PHYS.T_DT);
   for (let i = 0; i < pts.length; i++) {
     const ew = pts[i].ew, ns = pts[i].ns;
     let peak = 0;
-    const nT = Math.round(PHYS.T_MAX / PHYS.T_DT);
     for (let s = 0; s <= nT; s++) {
       const t = s * PHYS.T_DT;
       const ewc = rec.VT * t;
@@ -97,10 +135,20 @@ function computeLiveWind(model, rec, B, pts) {
       const Ux = uRad * cp + vTan * (-sp) + cx;
       const Uy = uRad * sp + vTan * cp + cy;
       const spd = Math.hypot(Ux, Uy);
-      const surf = spd * cfEffective(rMiles, RmaxMiles, rec.CF) * PHYS.MS_TO_MPH;
+      let surf = spd * cfEffective(rMiles, RmaxMiles, rec.CF) * PHYS.MS_TO_MPH;
+      if (sched) surf *= sched[s];          // K&D intensity ratio at this time
       if (surf > peak) peak = surf;
     }
     out[i] = peak;
   }
   return out;
+}
+
+// Holland/Willoughby with Kaplan-DeMaria decay: marine pass -> V0 -> decayed pass
+function computeLiveWindKD(model, rec, B, pts) {
+  const marine = computeLiveWind(model, rec, B, pts);
+  let V0 = 0;
+  for (let i = 0; i < marine.length; i++) if (marine[i] > V0) V0 = marine[i];
+  const sched = intensitySchedule(V0, rec.VT, pts);
+  return computeLiveWind(model, rec, B, pts, sched);
 }
