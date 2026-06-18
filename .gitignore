@@ -21,3 +21,8 @@ tests/auto/server.pid
 docs/*.aux
 docs/*.log
 docs/*.out
+
+# LaTeX build artifacts
+docs/*.fls
+docs/*.fdb_latexmk
+docs/build.log

@@ -1,0 +1,165 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{amsmath}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+\graphicspath{{figures/}}
+
+\title{\textbf{Form S-6 Interactive Grid and Wind Fields}\\[2pt]
+\large Sensitivity and Uncertainty Analysis over Southern Florida}
+\author{Paul Fishwick and Claude Code}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Purpose}
+This project implements the grid and wind-field machinery underlying
+\emph{Form S-6 (Hypothetical Events for Sensitivity and Uncertainty Analysis)} of
+the Florida Commission on Hurricane Loss Projection Methodology Report of
+Activities (ROA), which supports \emph{Standard S-3 (Uncertainty Analysis for
+Hurricane Model Output)}. The deliverable is an interactive browser application
+(HTML/CSS/JavaScript + Leaflet) that draws the official $21\times40$ grid over
+southern Florida, runs selectable hurricane wind-field models over it, and
+performs the sensitivity (SRC) and uncertainty (EPR) analyses the ROA prescribes.
+
+\section{The grid and storm track}
+The grid (ROA Figs.~3--4) has $21\times40=840$ vertices at $\sim$3 statute-mile
+spacing: east--west $E\!=\!0,3,\dots,117$ (40 columns) and north--south
+$N\!=\!-15,-12,\dots,45$ (21 rows). Of the 840 vertices, \textbf{682 are land}
+and 158 water, taken directly from the \texttt{Land-Water ID} worksheet of
+\texttt{FormS6Input.xlsx}. The point $(0,0)$ is the storm centre at $t\!=\!0$,
+nine miles east of the landfall location $(25.8611^\circ$N$,\,80.1196^\circ$W$)$;
+the storm tracks due west, $(0,0)\!\to\!(117,0)$, over 12 hours. Figure~\ref{fig:grid}
+shows the rendered grid (land vs.\ water), the track, and the landfall marker.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{grid_basemap.png}
+\caption{The 840-vertex Form S-6 grid over southern Florida: land (grey) and
+water (blue) vertices, the due-west storm track (dashed), the $t\!=\!0$ centre,
+and the landfall marker.}
+\label{fig:grid}
+\end{figure}
+
+\section{Wind-field models}
+Three wind-field models are provided, each evaluated at all 840 vertices.
+\textbf{Powell} is an iterative boundary-layer PDE (slab) solver;
+\textbf{Holland} is the closed-form gradient-wind profile; \textbf{Willoughby}
+is a piecewise power-law profile anchored to the Holland $V_{\max}$. All three
+include translation asymmetry from the storm motion. Powell is precomputed in
+Python (PyTorch/MPS, $\sim$2.3\,s per solve); Holland and Willoughby are
+closed-form and computed live in the browser.
+
+Per-vector inputs come from the \texttt{SA all Variables} worksheet: central
+pressure CP, radius of maximum wind Rmax, translation speed VT, wind-field shape
+parameter WSP, conversion factor CF, and far-field pressure FFP, for 100 vectors
+in each of categories 1, 3, and 5. The pressure deficit is $\Delta p=\text{FFP}-\text{CP}$.
+WSP is supplied as a quantile $p\in[0,1]$ and mapped to the Holland shape
+parameter $B$ through a user-selectable distribution (default Uniform$[1.0,2.5]$,
+$B=B_{\min}+p\,(B_{\max}-B_{\min})$).
+
+\paragraph{Conversion factor (CF).}
+The ROA CF variable converts modelled gradient winds to surface winds using a
+three-zone radial rule (ROA pp.~184--185): for $r<R_{\max}$,
+$\text{CF}_{\text{eff}}=\text{CF}\cdot r/R_{\max}$; for
+$R_{\max}\!<\!r\!<\!3R_{\max}$, $\text{CF}_{\text{eff}}=\text{CF}-0.1\,(r-R_{\max})/(2R_{\max})$;
+and for $r>3R_{\max}$, $\text{CF}_{\text{eff}}=\text{CF}-0.1$. The models are run
+at gradient level ($\beta_{10}=1$) and CF performs the gradient$\to$surface
+conversion exactly as specified.
+
+\paragraph{Peak-wind metric and time sampling.}
+For each vector we record the per-vertex \textbf{12-hour peak surface wind}. The
+storm position is sampled finely ($\Delta t=0.1$\,h); coarse hourly sampling
+aliases the fast westward motion and produces a spurious ``comb'' artifact in the
+peak field, which fine sampling removes. Figures~\ref{fig:powellpts} and
+\ref{fig:contours} show the peak field as coloured points and as filled contours.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{powell_cat5_pts.png}
+\caption{Powell peak surface wind (Category 5, vector 1) coloured per vertex,
+with surface roughness applied. Strongest winds lie north of the track---correct
+for a westward-moving Northern-Hemisphere cyclone, where translation adds to
+rotation on the north side.}
+\label{fig:powellpts}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.49\textwidth]{powell_cat5_contour.png}\hfill
+\includegraphics[width=0.49\textwidth]{willoughby_cat5_contour.png}
+\caption{Filled-contour display (ROA Figs.~6--8 style) of the Category 5 peak
+field: Powell (left) and Willoughby (right). Contours are built on the $21\times40$
+lattice with the wind-speed colour bands.}
+\label{fig:contours}
+\end{figure}
+
+\section{Surface roughness}
+Surface roughness (terrain) is applied as a per-vertex, wind-speed-independent
+multiplier on the final surface wind, toggleable in the interface. The roughness
+length $z_0$ at each vertex is sampled from \textbf{NLCD~2021 land cover} (fetched
+as a properly georeferenced GeoTIFF from the MRLC WCS) via a published
+land-cover$\to z_0$ table, and converted from marine to terrain exposure with the
+gradient-tied \textbf{log-law} (Vickery et al.\ 2009 / ESDU):
+\[
+\text{factor}=\frac{\ln(z_{\text{ref}}/z_{0,\text{land}})/\ln(z_g/z_{0,\text{land}})}
+{\ln(z_{\text{ref}}/z_{0,\text{marine}})/\ln(z_g/z_{0,\text{marine}})},
+\]
+with $z_{\text{ref}}=10$\,m and gradient height $z_g=500$\,m; water returns
+$\approx1$. The land-mean factor is $\approx0.67$ (urban $\sim0.50$, wetland
+$\sim0.70$). This replaced an earlier heuristic that relied on an
+un-georeferenced JPEG.
+
+\section{Sensitivity and uncertainty analysis}
+Following Iman, Johnson, and Schroeder (2001), as the ROA cites:
+\begin{itemize}
+\item \textbf{Sensitivity (SRC).} Standardized regression coefficients from
+regressing the standardized output on the six standardized inputs over the 100
+SA vectors, per category. Sign gives direction, magnitude gives influence
+(ROA Fig.~9).
+\item \textbf{Uncertainty (EPR).} Expected percentage reduction in output
+variance per input, $\text{EPR}_i=\text{SRC}_i^2\times100\%$ (variance share;
+valid for near-independent inputs, as the ROA design intends) (ROA Fig.~10).
+\end{itemize}
+The output metric is the \textbf{mean peak wind over the 682 land vertices} (a
+wind proxy; the loss-cost output of the full Form S-6 is future work). The
+computed SRCs reproduce the ROA's qualitative findings: WSP dominates for
+Category~1 while Rmax grows to dominate for Category~5, with CP negative and CF,
+FFP, Rmax positive (Fig.~\ref{fig:analysis}).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.49\textwidth]{analysis_src.png}\hfill
+\includegraphics[width=0.49\textwidth]{analysis_epr.png}
+\caption{Sensitivity (SRC, left) and uncertainty (EPR, right) for the Powell
+model, plotted by hurricane category---the interactive analogues of ROA
+Figs.~9--10. The windows are independently movable and resizable.}
+\label{fig:analysis}
+\end{figure}
+
+\section{Interface and reproducibility}
+The viewer offers model / category / input-vector selection, the WSP$\to B$
+distribution control, a surface-roughness toggle, a points/filled-contour display
+toggle, light and dark themes (Fig.~\ref{fig:light}), nearest-point hover (peak
+wind, coordinates, land/water, place name, and the active input parameters), and
+the floating Sensitivity/Uncertainty windows.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{light_theme.png}
+\caption{Light theme, Powell Category~3 peak-wind points.}
+\label{fig:light}
+\end{figure}
+
+All data artifacts are reproducible via \texttt{pipeline/build\_all.sh}
+(\texttt{grid.json}, place names, NLCD fetch, \texttt{roughness.json},
+\texttt{inputs.json}, \texttt{powell.json}). The app is served with
+\texttt{./start} at \url{http://localhost:8012/web/index.html}. Figures in this
+report are captured by \texttt{docs/capture\_figures.py} (Selenium driving headless
+Chrome against the running viewer).
+
+\end{document}
