@@ -6,6 +6,7 @@ const state = {
   powell: null,
   powellKd: null,         // Powell Kaplan–DeMaria decayed peaks (after UA run)
   powellField: null,      // Powell storm-relative isotach fields (after UA run)
+  powellUa: null,         // Powell UA-sheet outputs for faithful EPR
   roughness: null,        // per-point marine->land multiplier
   map: null,
   markers: [],            // circleMarker per grid point, in grid.json order
@@ -356,6 +357,8 @@ async function init() {
     catch (e) { state.powellKd = null; }   // generated after the UA run
     try { state.powellField = await (await fetch("../outputs/web/powell_field.json")).json(); }
     catch (e) { state.powellField = null; }  // generated after the UA run
+    try { state.powellUa = await (await fetch("../outputs/web/powell_ua.json")).json(); }
+    catch (e) { state.powellUa = null; }     // faithful EPR (Option 1)
     buildMap();
     setupHover();
     setupAnalysis();

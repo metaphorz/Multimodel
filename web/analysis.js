@@ -68,6 +68,24 @@ function computeSRC(model) {
   return result;
 }
 
+// ---- faithful EPR (Powell, Option 1): variance share from the UA sheets ---
+// EPR_i = Var(Y when only X_i varies) / Var(Y_SA), from powell_ua.json + powell.json.
+const UA_KEY = { CP: "cp", Rmax: "rmax", VT: "vt", WSP: "wsp", CF: "cf", FFP: "ffp" };
+function variance(a) { const m = mean(a); return mean(a.map(v => (v - m) * (v - m))); }
+function faithfulEPR() {
+  const ua = state.powellUa, pk = state.powell;
+  if (!ua || !pk) return null;
+  const land = state.grid.points.map((p, i) => p.land ? i : -1).filter(i => i >= 0);
+  const res = {};
+  for (const cat of SA_CATS) {
+    const ysa = pk[cat].map(v => mean(land.map(i => v[i])));   // marine land-mean per SA vector
+    const vsa = variance(ysa) || 1e-9;
+    res[cat] = {};
+    for (const v of SA_VARS) res[cat][v] = variance(ua[UA_KEY[v]][cat]) / vsa * 100;
+  }
+  return res;
+}
+
 // ---- draggable/resizable floating panels (SRC + EPR can coexist) ---------
 const panels = {};          // mode -> { el, body, title }
 let zTop = 1000;
@@ -150,6 +168,9 @@ function drawChart(mode) {
   }
   const isEPR = mode === "epr";
   const cats = [1, 3, 5];
+  // faithful EPR for Powell when the UA precompute is available; else SRC^2
+  const model = analysisState.cache.model;
+  const epr = (isEPR && model === "powell") ? faithfulEPR() : null;
 
   // values per var per cat
   const series = {};
@@ -157,7 +178,7 @@ function drawChart(mode) {
   for (const v of SA_VARS) {
     series[v] = cats.map(c => {
       const src = data["cat" + c].src[v];
-      const val = isEPR ? src * src * 100 : src;
+      const val = isEPR ? (epr ? epr["cat" + c][v] : src * src * 100) : src;
       vmin = Math.min(vmin, val); vmax = Math.max(vmax, val);
       return val;
     });
@@ -202,7 +223,8 @@ function drawChart(mode) {
     svg + `<div class="legend2">${legend}</div>` +
     `<p class="note">${analysisState.cache.model} · metric: mean peak wind over 682 land pts` +
     ` · land effect: ${analysisState.cache.land}<br>${r2}` +
-    (isEPR ? "<br>EPR ≈ SRC² (variance share)" : "") + "</p>";
+    (isEPR ? (epr ? "<br>EPR = Var(Y|Xᵢ)/Var(Y) from UA sheets (faithful, marine)"
+                  : "<br>EPR ≈ SRC² (variance share)") : "") + "</p>";
 }
 
 function setupAnalysis() {
