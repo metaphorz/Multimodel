@@ -196,9 +196,63 @@ Done:
       changed 5/6 curves (interactions visible), %TLC re-render, CDF renders. **PASSED.**
       No regression: `test_mean_csv_buttons.py` still passes; SRC works for wind + %TLC.
 
-Phase B (later, not now): scikit-learn GPR (ARD lengthscales = sensitivity) + small MLP,
-precompute → JSON, Linear vs GPR vs NN comparison, variance-based total/interaction indices,
-optional grid-point-level SA map.
+## Metamodels Phase B (machine-learning metamodels) — PLANNED, not started
+Upgrade the metamodel backend from the second-order response surface to
+machine-learning metamodels, per the 6/5/26 deck. Preserves the app's existing
+hybrid pattern: **train offline in Python → export JSON → the browser only
+evaluates** (identical to how Powell already works). The deployed site stays a
+zero-backend static page (GitHub Pages unaffected).
+
+### Reality check (decide before building)
+With Powell the simulator is smooth + deterministic, so the linear/RSM metamodel
+already gives R²≈1.0. GPR/NN will NOT predict better — their value here is
+**diagnostic**: ARD length-scales as a sensitivity ranking, variance-based
+(Sobol) total/interaction indices, and confirming the interaction structure three
+independent ways (Linear vs GPR vs NN). Build Phase B for the diagnostics, not
+for accuracy.
+
+### Pieces
+1. **GPR metamodel** — scikit-learn `GaussianProcessRegressor`, ARD kernel, per
+   category, per response (wind / %TLC). Export length-scales θ (= sensitivity),
+   kernel hyperparameters, training points + α, and R²/CV.
+2. **Neural-net metamodel** — `MLPRegressor` (~2 layers × 6 nodes, 5-fold CV).
+   Export weights/biases + activation + input scaling + R²/CV.
+3. **Comparison** — Linear vs GPR vs NN: R²/CV table + overlaid profiler curves.
+4. **Variance-based indices** — Sobol total + two-factor interaction indices from
+   GPR (slide 26); feeds the existing EPR panel when Metamodel = GPR.
+5. **Grid-point-level SA map** — sensitivity computed at every vertex (not the
+   land-mean), surfaced as a map colour mode (dominant input per vertex, or a
+   chosen variable's importance).
+
+### UI footprint (small — mostly reuse)
+- `index.html` Analysis section: **+1 dropdown** `Metamodel: Linear (RSM) / GPR /
+  Neural net` (drives the existing Interaction Profiler + SRC), **+1 button**
+  `Compare metamodels` (new overlay panel).
+- Existing **EPR panel** gains Sobol total/interaction indices when GPR selected
+  (no new button; maybe a tiny main/total toggle).
+- Existing **Color grid by** dropdown: **+1 option** `Sensitivity (dominant input)`
+  (+ optional per-variable picker) for the grid-point SA map.
+- Interaction Profiler, %TLC CDF, Response toggle: unchanged, reused as-is.
+
+### Build outline
+- [ ] `pipeline/`: Python script fits GPR + MLP per (category × response) over the
+      100 LHC vectors; writes `outputs/web/metamodels.json` (θ, weights, R²/CV,
+      Sobol indices). Mirrors the Powell precompute step; runnable via a shell script.
+- [ ] `web/analysis.js`: JS predictors `gprPredict()` (kernel eval vs training pts)
+      and `mlpPredict()` (forward pass); route `fitRSM`→ a metamodel dispatcher
+      keyed by the new dropdown.
+- [ ] `web/analysis.js`: `Compare metamodels` panel (R²/CV + overlaid profiles);
+      EPR panel reads Sobol indices for GPR.
+- [ ] `web/viewer.js` + `analysis.js`: grid-point SA colour mode in `updateField`.
+- [ ] `index.html` / `style.css`: the +1 dropdown, +1 button, +1 colour-by option.
+- [ ] Selenium tests in `tests/auto/`: metamodel switch re-renders profiler;
+      compare panel shows 3 series; grid-point SA colours the map.
+- [ ] Docs: extend §5 with GPR/NN, ARD, Sobol indices; new Selenium figures.
+
+### Open question for later
+- Separate interactive *training/DOE bench* (live refit, CNNDOE designs) — if
+  wanted, that is a distinct Python/notebook companion, NOT this static viewer.
+  This app only ever *evaluates* pre-fit models.
 
 ## Review
 _(to be filled in as work proceeds)_
