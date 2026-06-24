@@ -17,7 +17,7 @@ const state = {
   hoverTip: null,         // free-floating tooltip for nearest-point hover
   pixelPts: null,         // cached container-pixel coords of grid points
   metamodels: null,       // Phase B: precomputed GPR + NN params (default config)
-  meanMode: false,        // true -> show per-point mean wind over all 100 vectors
+  meanMode: true,         // default view: per-point mean wind over all 100 vectors
   layers: { track: null, landfall: null },
 };
 
@@ -509,6 +509,9 @@ function wireControls() {
     document.getElementById("vectorLabel").textContent = vec.value;
     updateField();
   });
+  // Mean is the default view; reflect it in the button + disabled slider at startup.
+  document.getElementById("btnMean").classList.toggle("active", state.meanMode);
+  vec.disabled = state.meanMode;
 
   document.getElementById("btnMean").addEventListener("click", () => {
     state.meanMode = !state.meanMode;
