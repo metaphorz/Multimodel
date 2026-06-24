@@ -287,11 +287,12 @@ function bringFront(el) { el.style.zIndex = ++zTop; }
 function makeDraggable(el, handle) {
   let sx, sy, ox, oy, dragging = false;
   handle.addEventListener("mousedown", e => {
-    if (e.target.classList.contains("ap-close")) return;
+    // don't start a drag from an interactive control in the header (close, reset…)
+    if (["BUTTON", "INPUT", "SELECT"].includes(e.target.tagName)) return;
     dragging = true; sx = e.clientX; sy = e.clientY;
     const r = el.getBoundingClientRect(), pr = el.parentElement.getBoundingClientRect();
     ox = r.left - pr.left; oy = r.top - pr.top;
-    el.style.right = "auto"; bringFront(el); e.preventDefault();
+    el.style.right = "auto"; el.style.bottom = "auto"; bringFront(el); e.preventDefault();
     document.addEventListener("mousemove", move);
     document.addEventListener("mouseup", up);
   });

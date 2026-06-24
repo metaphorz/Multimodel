@@ -180,6 +180,10 @@ function setupPoi() {
   document.getElementById("poiAdd").addEventListener("click", doAdd);
   inp.addEventListener("keydown", e => { if (e.key === "Enter") doAdd(); });
   document.getElementById("poiReset").addEventListener("click", poiReset);
-  if (window.L) L.DomEvent.disableClickPropagation(document.getElementById("poiPanel"));
+  const panel = document.getElementById("poiPanel");
+  if (window.L) L.DomEvent.disableClickPropagation(panel);
+  // draggable by its header, like the floating analysis/windfield panels
+  panel.addEventListener("mousedown", () => bringFront(panel));
+  makeDraggable(panel, panel.querySelector(".poi-head"));
   poiRender();
 }

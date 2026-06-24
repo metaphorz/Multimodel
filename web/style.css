@@ -98,7 +98,8 @@ body.theme-light #legend .lg { color: #2a3744; }
   font-size: 12px; overflow: hidden; }
 #poiPanel .poi-head { display: flex; justify-content: space-between; align-items: center;
   padding: 8px 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
-  font-size: 11px; color: #8fa3b6; border-bottom: 1px solid #2c3947; }
+  font-size: 11px; color: #8fa3b6; border-bottom: 1px solid #2c3947;
+  cursor: move; user-select: none; }
 #poiReset { background: none; border: 1px solid #3a4757; color: #9fb0c0;
   font-size: 10px; border-radius: 4px; padding: 2px 6px; cursor: pointer; }
 #poiReset:hover { color: #fff; border-color: #56657a; }
