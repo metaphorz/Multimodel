@@ -340,5 +340,19 @@ CSV, per the statistician's spec.
       button) via the canonical settings in `docs/capture_figures.py`; rebuilt
       `docs/FormS6.pdf`.
 
+## Contour-mode info readout fix (2026-06-24) — DONE
+The bottom-left status line showed `Peak wind 0.0 mph · land mean – mph` (and
+`$0.00M` loss) whenever Display = Filled contour. Cause: peak/land-mean/loss were
+tallied inside the per-vertex marker-styling loop, which early-`return`s on hidden
+markers — and in contour mode every dot is hidden. The contour overlay itself was
+always correct (drawn from a separate copy of the wind array); only the text was wrong.
+
+- [x] `web/viewer.js`: in `updateField`, accumulate the summary stats from the
+      `wind` field before the visibility gate, so the readout is correct in both
+      points and contour modes. Marker styling unchanged.
+- [x] Verified via Selenium: Powell CAT5 v1 now reads Peak 148.7 / land mean 78.2
+      (wind) and $19.28M = 28.27% (loss) identically in points and contour modes;
+      `test_gridpoint_csv.py` still passes; no console errors.
+
 ## Review
 _(to be filled in as work proceeds)_

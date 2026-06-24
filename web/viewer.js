@@ -434,25 +434,35 @@ function updateField() {
 
   let wmax = 0, wsum = 0, n = 0, lossTotal = 0;
   g.points.forEach((p, i) => {
+    const w = wind ? wind[i] : null;
+
+    // summary stats from the field itself — independent of marker visibility,
+    // so the readout stays correct in filled-contour mode (dots hidden).
+    if (sensMode) {
+      if (p.land && sens && sens[i] >= 0) n++;
+    } else if (lossMode) {
+      const mdr = w != null ? mdrAt(w) : null;
+      if (mdr != null && p.land) { lossTotal += mdr * EXPOSURE_VALUE; if (w > wmax) wmax = w; n++; }
+    } else if (w != null) {                          // wind mode
+      if (w > wmax) wmax = w; if (p.land) { wsum += w; n++; }
+    }
+
+    // marker styling (hidden in contour mode or when "Grid points" is off)
     const m = state.markers[i];
     const visible = !contourMode && showGrid && (p.land || showWater);
     m.setStyle({ opacity: visible ? 1 : 0, fillOpacity: visible ? 0.9 : 0 });
     if (!visible) { m.closeTooltip && m.unbindTooltip(); return; }
 
     let fill;
-    const w = wind ? wind[i] : null;
     if (colorBy === "landwater") {
       fill = p.land ? "#6b7785" : "#2b6cb0";
     } else if (sensMode) {
       fill = (p.land && sens && sens[i] >= 0) ? VAR_COLORS[SA_VARS[sens[i]]] : "#243244";
-      if (p.land && sens && sens[i] >= 0) n++;
     } else if (lossMode) {
       const mdr = w != null ? mdrAt(w) : null;
       fill = p.land ? lossColor(mdr) : "#243244";   // loss only meaningful on land
-      if (mdr != null && p.land) { lossTotal += mdr * EXPOSURE_VALUE; if (w > wmax) wmax = w; n++; }
     } else {
       fill = windColor(w);
-      if (w != null) { if (w > wmax) wmax = w; if (p.land) { wsum += w; n++; } }
     }
     m.setStyle({ fillColor: fill });
   });
