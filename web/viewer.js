@@ -561,6 +561,7 @@ async function init() {
     buildMap();
     setupHover();
     setupAnalysis();
+    setupPoi();
     // powell.json may still be precomputing; load if present
     try {
       state.powell = await (await fetch("../outputs/web/powell.json", NC)).json();

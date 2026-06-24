@@ -45,6 +45,9 @@ FIGURES = [
     ("grid_sensitivity",  {"model": "powell", "category": "1",
                           "colorBy": "sensitivity", "display": "points"}, None),
     ("windfield_popup",  {"model": "holland", "category": "5", "_click": [30, 0]}, ".wf-panel"),
+    ("points_of_interest", {"model": "powell", "category": "5", "colorBy": "wind",
+                          "display": "points",
+                          "_js": "poiOpenDetail(poiGridIdx(9,15));"}, None),
 ]
 
 JS_SET = """
@@ -58,7 +61,7 @@ el.dispatchEvent(new Event(el.type === 'range' ? 'input' : 'change'));
 
 def apply(driver, controls):
     for k, v in controls.items():
-        if k in ("_btn", "_click"):
+        if k in ("_btn", "_click", "_js"):
             continue
         driver.execute_script(JS_SET, k, str(v) if not isinstance(v, bool) else v)
         time.sleep(0.15)
@@ -69,6 +72,8 @@ def apply(driver, controls):
         driver.execute_script(
             "const i=state.grid.points.findIndex(p=>p.land&&p.ns===arguments[1]&&p.ew===arguments[0]);"
             "if(i>=0) openWindfieldPopup(i);", ew, ns)
+    if "_js" in controls:
+        driver.execute_script(controls["_js"])
 
 
 def main():

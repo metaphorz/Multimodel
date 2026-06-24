@@ -125,7 +125,20 @@
     </section>
   </div>
 
-  <div id="map"></div>
+  <div id="map">
+    <div id="poiPanel">
+      <div class="poi-head">
+        <span>Points of Interest</span>
+        <button id="poiReset" title="restore default points">reset</button>
+      </div>
+      <div class="poi-add">
+        <input id="poiInput" type="text" placeholder="ew,ns  e.g. 9,15" />
+        <button id="poiAdd">Add</button>
+      </div>
+      <div id="poiErr" class="poi-err"></div>
+      <ul id="poiList"></ul>
+    </div>
+  </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
@@ -136,6 +149,7 @@
   <script src="contour.js"></script>
   <script src="analysis.js"></script>
   <script src="popup.js"></script>
+  <script src="poi.js"></script>
   <script src="viewer.js"></script>
 </body>
 </html>

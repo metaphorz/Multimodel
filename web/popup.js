@@ -25,24 +25,21 @@ function ensureWfPanel() {
   return wfPanel;
 }
 
-function openWindfieldPopup(idx) {
-  const p = ensureWfPanel();
-  p.el.style.display = "flex";
-  bringFront(p.el);
+// Build the windfield body (isotach + time series SVGs + note) for a vertex,
+// for the current model/category/vector/land selection. Shared by the left-click
+// popup and the Points-of-Interest detail panel. Returns an HTML string, or a
+// short <p class='note'> message string if the exact field isn't available yet.
+function windfieldBodyHTML(idx) {
   const { model, cat, vIdx, rec } = currentSelection();
   const pt = state.grid.points[idx];
   const land = document.getElementById("landEffect").value;
-  p.title.textContent =
-    `Windfield — ${model} ${cat.toUpperCase()} v${vIdx + 1} · (${pt.ew},${pt.ns}) mi`;
 
-  // --- assemble field + time series ---
   let field, ts;
   if (model === "powell") {
     const pf = state.powellField && state.powellField[cat] && state.powellField[cat][vIdx];
     if (!pf) {
-      p.body.innerHTML = "<p class='note'>Powell windfield popup: exact field precompute " +
+      return "<p class='note'>Powell windfield popup: exact field precompute " +
         "scheduled after the UA run (powell_field.json). Holland/Willoughby work now.</p>";
-      return;
     }
     field = { Z: pf, n: state.powellField.n, halfKm: state.powellField.halfKm };
     ts = powellTimeSeries(field, pt, rec, land, idx);
@@ -57,9 +54,20 @@ function openWindfieldPopup(idx) {
     }
     ts = pointTimeSeries(model, rec, B, pt.ew, pt.ns, opts);
   }
-  p.body.innerHTML = isotachSVG(field, ts, pt) + timeSeriesSVG(ts) +
+  return isotachSVG(field, ts, pt) + timeSeriesSVG(ts) +
     `<p class="note">isotachs = storm-relative marine surface wind (mph); ` +
     `marker = vertex at peak time; land effect (${land}) applied to the time series.</p>`;
+}
+
+function openWindfieldPopup(idx) {
+  const p = ensureWfPanel();
+  p.el.style.display = "flex";
+  bringFront(p.el);
+  const { model, cat, vIdx } = currentSelection();
+  const pt = state.grid.points[idx];
+  p.title.textContent =
+    `Windfield — ${model} ${cat.toUpperCase()} v${vIdx + 1} · (${pt.ew},${pt.ns}) mi`;
+  p.body.innerHTML = windfieldBodyHTML(idx);
 }
 
 // sample a stored Powell storm-relative field for the per-dot time series

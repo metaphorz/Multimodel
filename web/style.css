@@ -89,3 +89,55 @@ body.theme-light #legend .lg { color: #2a3744; }
 
 .grid-pt-land { fill: #6b7785; }
 .grid-pt-water { fill: #2b6cb0; }
+
+/* ---- Points of Interest (lower-right map overlay) ---- */
+#poiPanel { position: absolute; right: 12px; bottom: 18px; z-index: 700;
+  width: 226px; max-height: 46vh; display: flex; flex-direction: column;
+  background: rgba(28,37,48,.94); color: #e6edf3; border: 1px solid #2c3947;
+  border-radius: 8px; box-shadow: 0 4px 18px rgba(0,0,0,.4);
+  font-size: 12px; overflow: hidden; }
+#poiPanel .poi-head { display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+  font-size: 11px; color: #8fa3b6; border-bottom: 1px solid #2c3947; }
+#poiReset { background: none; border: 1px solid #3a4757; color: #9fb0c0;
+  font-size: 10px; border-radius: 4px; padding: 2px 6px; cursor: pointer; }
+#poiReset:hover { color: #fff; border-color: #56657a; }
+.poi-add { display: flex; gap: 6px; padding: 8px 10px 4px; }
+.poi-add input { flex: 1; min-width: 0; padding: 5px 6px; background: #0f1620;
+  color: #e6edf3; border: 1px solid #2c3947; border-radius: 5px; font-size: 12px; }
+#poiAdd { padding: 5px 9px; background: #2563eb; color: #fff; border: none;
+  border-radius: 5px; font-size: 12px; cursor: pointer; }
+#poiAdd:hover { background: #1d4ed8; }
+.poi-err { color: #fca5a5; font-size: 11px; padding: 0 10px; min-height: 14px; }
+#poiList { list-style: none; margin: 0; padding: 2px 6px 8px; overflow-y: auto; }
+.poi-row { display: flex; align-items: center; gap: 6px; padding: 2px 4px; }
+.poi-view { background: none; border: none; color: #93c5fd; cursor: pointer;
+  font-size: 12px; font-weight: 600; padding: 2px 0; white-space: nowrap; }
+.poi-view:hover { color: #bfdbfe; text-decoration: underline; }
+.poi-view:disabled { color: #6b7785; cursor: default; text-decoration: none; }
+.poi-place { flex: 1; min-width: 0; color: #9fb0c0; font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.poi-del { background: none; border: none; color: #8fa3b6; cursor: pointer;
+  font-size: 16px; line-height: 1; padding: 0 2px; }
+.poi-del:hover { color: #fca5a5; }
+.poi-pin { color: #fbbf24; font-size: 16px; line-height: 20px; text-align: center;
+  text-shadow: 0 0 2px #000, 0 0 2px #000; cursor: pointer; }
+
+/* POI detail panel: reuses .analysis-panel chrome */
+.poi-detail .poi-actions { margin: 0 0 8px; }
+.poi-print { padding: 6px 12px; background: #2563eb; color: #fff; border: none;
+  border-radius: 5px; font-size: 12px; cursor: pointer; }
+.poi-print:hover { background: #1d4ed8; }
+.poi-detail .poi-info { font-size: 13px; line-height: 1.6; color: #1c2530; }
+.poi-detail .poi-h { margin: 12px 0 4px; font-size: 13px; color: #1c2530; }
+
+body.theme-light #poiPanel { background: rgba(241,244,248,.96); color: #1c2530;
+  border-color: #c2ccd6; }
+body.theme-light #poiPanel .poi-head { color: #5a6b7c; border-bottom-color: #d4dce5; }
+body.theme-light .poi-add input { background: #fff; color: #1c2530; border-color: #c2ccd6; }
+body.theme-light .poi-place { color: #5a6b7c; }
+body.theme-light .poi-view { color: #2563eb; }
+
+@media print {
+  #sidebar, #map, #poiPanel { display: none !important; }
+}

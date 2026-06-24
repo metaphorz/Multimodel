@@ -354,5 +354,79 @@ always correct (drawn from a separate copy of the wind array); only the text was
       (wind) and $19.28M = 28.27% (loss) identically in points and contour modes;
       `test_gridpoint_csv.py` still passes; no console errors.
 
+## Points of Interest panel + printable detail page (2026-06-24) — DONE
+Built and Selenium-tested. Lower-right map panel lists user grid points by
+`(ew,ns)`; insert/delete with validation; gold-star markers on the map; click a
+point for a draggable detail panel combining the hover summary + windfield
+isotach/time-series, with a **Print / Save PDF** button (opens a clean print
+window → browser print dialog → printer or PDF). POIs persist in `localStorage`
+(reset link restores the 5 defaults). Approved options: localStorage + markers.
+- `web/popup.js`: extracted `windfieldBodyHTML(idx)` (shared by left-click popup
+  and POI detail — left-click popup verified still rendering 2 SVGs).
+- `web/poi.js` (new): POI state/UI/markers/detail/print.
+- `index.html`: `#poiPanel` map overlay + `poi.js`; `style.css`: panel/marker/print.
+- `web/viewer.js`: `setupPoi()` in `init()`.
+- Test `tests/auto/test_poi.py`: defaults=5, add→6, bad coord errors, detail has
+  hover text + 2 SVGs + Print btn, delete→5, no console errors. **PASSED.**
+- Docs: `docs/FormS6.tex` Points-of-Interest paragraph + figure
+  `points_of_interest.png` (added to `capture_figures.py` with a new `_js` hook);
+  rebuilt `docs/FormS6.pdf`.
+
+### Original plan (for reference)
+
+### Goal
+A **Points of Interest** area in the lower-right of the map where the user can
+insert/delete grid points by `(ew,ns)` coordinate. Clicking a POI opens an in-app
+detail panel that combines BOTH the hover details and the left-click windfield
+image for that point, and the panel is **savable / printable to printer or PDF**.
+
+### Coordinate system (confirmed from grid.json)
+Points are addressed by `(ew, ns)` in miles on a 3-mile grid:
+`ew ∈ {0,3,…,117}` (40 values), `ns ∈ {-15,-12,…,45}` (21 values), 840 vertices.
+Insert validation = both multiples of 3 in range AND an existing grid vertex.
+
+### Initial POIs (5, per your answer)
+`(9,15) (15,0) (60,0) (12,-12) (6,45)` — all land points (Dania Beach, Pinewood,
+Kendall West, Key Biscayne, Boynton Beach).
+
+### Design decisions (from your answers)
+- Detail view = **in-app draggable panel** (like the existing windfield/analysis
+  panels), stacking hover details over the isotach + wind-vs-time plots.
+- **Print / Save PDF**: a button in the detail panel opens a clean print view and
+  calls `window.print()`, so the OS dialog can print or "Save as PDF".
+
+### To do
+- [ ] `web/popup.js`: extract the windfield body builder into a reusable
+      `windfieldBodyHTML(idx)` returning `{title, html}` (or `null` if no field).
+      `openWindfieldPopup` calls it; the POI detail panel reuses it (DRY, no
+      behavior change to the existing left-click popup).
+- [ ] `web/poi.js` (new): POI state + UI.
+      - defaults + `localStorage` persistence (so inserts/deletes survive reload;
+        a small "reset" link restores the 5 defaults).
+      - `gridIdx(ew,ns)` lookup; `addPoi`/`removePoi` with validation + a clear
+        inline error for bad/duplicate/off-grid coordinates.
+      - `renderPoiPanel()`: list of `(ew,ns) — place`, each row with a **view**
+        action and a **×** delete; an `ew,ns` input + **Add** button on top.
+      - `openPoiDetail(idx)`: combined panel = `pointInfoHTML(idx)` (hover details)
+        + `windfieldBodyHTML(idx)` (isotach + time series) + a **Print / Save PDF**
+        button; draggable/closable like the windfield panel.
+      - `printPoiDetail(idx)`: opens a minimal print window with the same content
+        and the app title/coords as a header, then `window.print()`.
+      - small POI markers on the map (so points are findable); toggle with the
+        existing Layers section is optional — default on.
+- [ ] `index.html`: `#poiPanel` map overlay (lower-right) + load `web/poi.js`.
+- [ ] `web/style.css`: styles for `#poiPanel`, the detail panel, the POI markers,
+      and an `@media print` block so the print view is clean (no map/sidebar).
+- [ ] `web/viewer.js`: call `setupPoi()` from `init()` after the map is built.
+- [ ] Selenium test `tests/auto/test_poi.py`: 5 defaults present; add (30,-6) →
+      6 rows; delete one → 5; open a detail → has hover text + 2 SVG plots +
+      Print button; bad coord shows error; no console errors.
+- [ ] Docs: add a short Points-of-Interest paragraph to `docs/FormS6.tex`; capture
+      one figure of the panel + open detail page; rebuild the PDF.
+
+### Open question
+- Persist POIs in `localStorage` (survive reload) vs session-only? Plan assumes
+  **localStorage + a reset link**. Say the word if you'd rather they reset each load.
+
 ## Review
 _(to be filled in as work proceeds)_

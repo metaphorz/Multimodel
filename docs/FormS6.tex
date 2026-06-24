@@ -371,6 +371,29 @@ resizable windows. Every plot the viewer draws---the analysis charts and the
 windfield popup alike---supports mouse-wheel zoom about the cursor, drag-to-pan
 once zoomed, and double-click to reset, for close inspection of individual curves.
 
+\paragraph{Points of Interest.}
+A panel in the lower-right of the map (Figure~\ref{fig:poi}) holds a list of named
+\emph{points of interest}, addressed by their $(\mathrm{ew},\mathrm{ns})$
+grid coordinate in miles; the user can insert any grid vertex (e.g.\ \texttt{9,15})
+or delete an existing one, and the list persists across reloads. Five points are
+provided by default---$(9,15)$, $(15,0)$, $(60,0)$, $(12,-12)$, $(6,45)$---each
+shown as a star marker on the map. Clicking a point opens a detail page that
+combines, for the current model/category, both the hover summary (peak/mean wind,
+loss, coordinates, land/water, place name, and the active input parameters) and the
+left-click windfield image (the storm-relative isotachs and the wind-vs-time series).
+A \textbf{Print / Save PDF} button renders the page through the browser's print
+dialog, so a point's report can be sent to a printer or saved as a PDF.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{points_of_interest.png}
+\caption{Points-of-Interest panel (lower right) with the five default points marked
+as stars on the map, and the detail page for $(9,15)$---Dania Beach---combining the
+hover summary, the storm-relative isotachs, and the wind-vs-time series, with a
+Print / Save-PDF button.}
+\label{fig:poi}
+\end{figure}
+
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.46\textwidth]{light_theme.png}\hfill
