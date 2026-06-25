@@ -282,6 +282,33 @@ cost ranges from roughly $14\%$ to $53\%$ of exposure with a mean near $33\%$.
 \label{fig:tlccdf}
 \end{figure}
 
+\paragraph{Loss exceedance and financial metrics (actuarial layer).}
+The viewer adds the third catastrophe-model leg---the financial module---on top of
+the hazard (wind field) and vulnerability (MDR) chain, grouping the analysis tools
+into \textbf{Statistics} (sensitivity, uncertainty, profiler, metamodel comparison)
+and \textbf{Actuarial} (loss-cost CDF and a \emph{Loss EP / Financial} panel,
+Figure~\ref{fig:financial}). Per-location net loss applies a deductible then a
+limit, $\text{net}=\min(\max(\text{LC}-d,0),\ell)$, aggregated to a net
+$\mathrm{TLC}(i)$ per input vector. In \emph{Conditional} mode the panel shows the
+severity exceedance $P(L>x)$ for the selected category with mean, CoV, and
+percentile losses. In \emph{Annualized} mode it weights the categories by editable
+event rates $\lambda_c$ (events/yr) to form an occurrence-exceedance-probability
+curve, the annual frequency of exceeding a loss being
+$\lambda(x)=\sum_c \lambda_c\,P(L_c>x)$; the panel reports the average annual loss
+$\mathrm{AAL}=\sum_c \lambda_c\,\overline{L_c}$, the 50/100/250-year return-period
+losses (PML), and the 100-year-tail TVaR. Financial terms are scoped to the panel,
+so the map and the per-point CSV continue to report ground-up loss.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.62\textwidth]{analysis_financial.png}
+\caption{Loss EP / Financial panel (annualized): the occurrence-exceedance-probability
+curve of annual loss versus return period (red dots = 50/100/250-year losses), with
+the editable event rates, deductible/limit, and the AAL / return-period / TVaR
+metrics. Category~5 weighting shown; Powell.}
+\label{fig:financial}
+\end{figure}
+
 The linear, second-order surface above is computed live in the browser. The
 machine-learning metamodels below are instead fit offline and only evaluated in
 the browser.

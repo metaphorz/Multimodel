@@ -48,6 +48,8 @@ FIGURES = [
     ("points_of_interest", {"model": "powell", "category": "5", "colorBy": "wind",
                           "display": "points",
                           "_js": "poiOpenDetail(poiGridIdx(9,15));"}, None),
+    ("analysis_financial", {"model": "powell", "category": "5",
+                          "_js": "openPanel('fin');"}, ".analysis-panel"),
 ]
 
 JS_SET = """
@@ -104,9 +106,11 @@ def main():
             out = FIG / f"{name}.png"
             if sel:
                 # enlarge the floating window so chart + legend + note all show
+                # (the financial panel has controls + plot + table -> taller)
+                h = "700px" if name == "analysis_financial" else "560px"
                 drv.execute_script(
                     "const p=document.querySelector('.analysis-panel');"
-                    "if(p){p.style.width='540px';p.style.height='560px';}")
+                    f"if(p){{p.style.width='540px';p.style.height='{h}';}}")
                 time.sleep(0.4)
                 drv.find_element(By.CSS_SELECTOR, sel).screenshot(str(out))
             else:

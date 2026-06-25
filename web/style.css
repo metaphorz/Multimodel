@@ -50,6 +50,19 @@ body.theme-light #legend .lg { color: #2a3744; }
   background: #2563eb; color: #fff; border: none; border-radius: 5px; font-size: 13px; }
 .analysis-btn:hover { background: #1d4ed8; }
 
+/* collapsible Statistics / Actuarial groups */
+.analysis-group { width: 100%; padding: 7px 10px; margin: 4px 0 0; cursor: pointer;
+  background: #243244; color: #e6edf3; border: none; border-radius: 5px; font-size: 13px;
+  font-weight: 600; text-align: left; display: flex; justify-content: space-between;
+  align-items: center; }
+.analysis-group:hover { background: #2c3d52; }
+.analysis-group::after { content: "\25B8"; font-size: 11px; color: #8fa3b6; }
+.analysis-group.open::after { content: "\25BE"; }
+.analysis-sub { display: none; padding-left: 8px; }
+.analysis-sub.open { display: block; }
+body.theme-light .analysis-group { background: #e2e8f0; color: #1c2530; }
+body.theme-light .analysis-group:hover { background: #d4dce5; }
+
 /* Mean / CSV buttons under the input-vector slider */
 .vec-actions { display: flex; gap: 6px; margin-top: 6px; }
 .vec-btn { flex: 1; padding: 6px; cursor: pointer; background: #2563eb; color: #fff;
@@ -95,6 +108,19 @@ body.theme-light #legend .lg { color: #2a3744; }
 
 .grid-pt-land { fill: #6b7785; }
 .grid-pt-water { fill: #2b6cb0; }
+
+/* Loss EP / Financial panel controls */
+.fin-ctl { font-size: 11px; color: #334155; margin-bottom: 8px; }
+.fin-mode { display: flex; gap: 6px; margin-bottom: 6px; }
+.fin-tab { flex: 1; padding: 5px; cursor: pointer; font-size: 12px;
+  background: #e2e8f0; color: #1c2530; border: none; border-radius: 5px; }
+.fin-tab.active { background: #2563eb; color: #fff; }
+.fin-rates, .fin-terms { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0; }
+.fin-rates.disabled { opacity: .45; }
+.fin-ctl label { display: inline-flex; align-items: center; gap: 3px; }
+.fin-ctl input { width: 64px; padding: 3px 4px; font-size: 11px;
+  border: 1px solid #c2ccd6; border-radius: 4px; }
+.fin-rates input { width: 52px; }
 
 /* ---- Points of Interest (lower-right map overlay) ---- */
 #poiPanel { position: absolute; right: 12px; bottom: 18px; z-index: 700;

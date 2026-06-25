@@ -334,8 +334,8 @@ function openPanel(mode) {
     panels[mode] = createPanel(mode);
     // size so the full plot + axis titles + legend + note fit without resizing
     const big = mode === "prof" || mode === "cmp";
-    panels[mode].el.style.width = big ? "580px" : "480px";
-    panels[mode].el.style.height = big ? "580px" : "480px";
+    panels[mode].el.style.width = big ? "580px" : (mode === "fin" ? "500px" : "480px");
+    panels[mode].el.style.height = big ? "580px" : (mode === "fin" ? "600px" : "480px");
   }
   panels[mode].el.style.display = "flex";
   bringFront(panels[mode].el);
@@ -348,6 +348,7 @@ function renderPanel(mode) {
   if (mode === "prof") return drawProfiler();
   if (mode === "cmp") return drawCompare();
   if (mode === "cdf") return drawCDF();
+  if (mode === "fin") return drawFinancial();
   return drawChart(mode);
 }
 
@@ -643,6 +644,208 @@ function drawCompare() {
     `<br>Overlaid partial-dependence: where Linear diverges from GPR/NN it is missing curvature/interaction.</p>`;
 }
 
+// ---- Loss EP / Financial (actuarial layer) -------------------------------
+// Adds the financial leg on top of hazard (wind) + vulnerability (MDR). Net loss
+// per location applies a deductible then a limit; severity is aggregated to net
+// TLC$ per input vector. Conditional mode = severity for the selected category;
+// Annualized mode = an OEP curve combining categories by their event rates.
+const finState = {
+  mode: "annual",                         // "annual" | "cond"
+  rates: { 1: 0.20, 3: 0.05, 5: 0.01 },   // events/yr by category (editable assumptions)
+  ded: 0,                                  // per-location deductible ($)
+  lim: null,                               // per-location limit ($); null -> exposure
+};
+
+// net TLC ($) per input vector for a category, after per-location deductible + limit
+function tlcSeries(model, cat, ded, lim) {
+  const recs = state.inputs ? state.inputs[cat] : null;
+  if (!recs || !state.vuln) return null;
+  const out = [];
+  for (let i = 0; i < recs.length; i++) {
+    const w = computeWindFor(model, cat, i);
+    if (!w || typeof w === "string") return null;     // null / "kd-pending"
+    let tlc = 0;
+    state.grid.points.forEach((p, j) => {
+      if (!p.land) return;
+      const lc = mdrAt(w[j]) * EXPOSURE_VALUE;
+      tlc += Math.min(Math.max(lc - ded, 0), lim);
+    });
+    out.push(tlc);
+  }
+  return out;
+}
+
+const fmtM = d => `$${(d / 1e6).toFixed(2)}M`;
+
+// loss at a target annual exceedance frequency from rate-weighted event samples
+// (each sample contributes annual frequency weight; invert the descending λ(x))
+function rpLoss(samples, targetFreq) {
+  const arr = samples.slice().sort((a, b) => b.loss - a.loss);   // high loss first
+  let cum = 0;
+  for (const s of arr) {
+    cum += s.w;
+    if (cum >= targetFreq) return s.loss;
+  }
+  return arr.length ? arr[arr.length - 1].loss : 0;
+}
+
+function drawFinancial() {
+  const p = panels["fin"];
+  if (!p || p.el.style.display === "none") return;
+  if (finState.lim == null) finState.lim = EXPOSURE_VALUE;
+  const model = document.getElementById("model").value;
+  const selCat = document.getElementById("category").value;
+  p.title.textContent = "Loss EP / Financial";
+
+  const controls =
+    `<div class="fin-ctl">` +
+    `<div class="fin-mode">` +
+    `<button class="fin-tab${finState.mode === "cond" ? " active" : ""}" data-mode="cond">Conditional</button>` +
+    `<button class="fin-tab${finState.mode === "annual" ? " active" : ""}" data-mode="annual">Annualized</button>` +
+    `</div>` +
+    `<div class="fin-rates${finState.mode === "cond" ? " disabled" : ""}">Event rate /yr ` +
+    [1, 3, 5].map(c =>
+      `<label>Cat${c}<input type="number" step="0.01" min="0" data-rate="${c}" ` +
+      `value="${finState.rates[c]}" ${finState.mode === "cond" ? "disabled" : ""}/></label>`).join("") +
+    `</div>` +
+    `<div class="fin-terms">` +
+    `<label>Deductible $<input type="number" step="1000" min="0" data-fin="ded" value="${finState.ded}"/></label>` +
+    `<label>Limit $<input type="number" step="1000" min="0" data-fin="lim" value="${finState.lim}"/></label>` +
+    `</div></div>`;
+
+  // gather net-loss severity samples per category
+  const cats = [1, 3, 5];
+  const sev = {};
+  for (const c of cats) {
+    const s = tlcSeries(model, "cat" + c, finState.ded, finState.lim);
+    if (!s) {
+      p.body.innerHTML = controls +
+        "<p class='note'>Loss unavailable — vulnerability curve not loaded, or Powell " +
+        "Kaplan–DeMaria precompute pending. Try Holland/Willoughby or land effect None/Roughness.</p>";
+      wireFinControls(p);
+      return;
+    }
+    sev[c] = s;
+  }
+
+  const W = 440, H = 270, mL = 64, mR = 14, mT = 14, mB = 46;
+  let svg, metrics;
+
+  if (finState.mode === "cond") {
+    // conditional severity exceedance for the selected category
+    const s = sev[+selCat].slice().sort((a, b) => a - b);
+    const n = s.length, lo = s[0], hi = s[n - 1], span = (hi - lo) || 1;
+    const xpix = q => mL + q * (W - mL - mR);                  // exceedance prob 0..1
+    const ypix = v => mT + (1 - (v - lo) / span) * (H - mT - mB);
+    svg = `<svg viewBox="0 0 ${W} ${H}" width="100%">`;
+    for (let t = 0; t <= 4; t++) {
+      const v = lo + (t / 4) * span;
+      svg += `<line x1="${mL}" y1="${ypix(v)}" x2="${W - mR}" y2="${ypix(v)}" stroke="#e2e8f0" stroke-dasharray="2 3"/>`;
+      svg += `<text x="${mL - 6}" y="${ypix(v) + 3}" text-anchor="end" class="ax">${fmtM(v)}</text>`;
+      svg += `<text x="${xpix(t / 4)}" y="${H - mB + 16}" text-anchor="middle" class="ax">${(t / 4).toFixed(2)}</text>`;
+    }
+    let path = "";
+    s.forEach((v, i) => {                                       // P(L > v) = (n-1-i)/n
+      path += `${i ? "L" : "M"}${xpix((n - 1 - i) / n).toFixed(1)},${ypix(v).toFixed(1)}`;
+    });
+    svg += `<line x1="${mL}" y1="${ypix(lo)}" x2="${W - mR}" y2="${ypix(lo)}" stroke="#64748b"/>`;
+    svg += `<line x1="${mL}" y1="${mT}" x2="${mL}" y2="${H - mB}" stroke="#64748b"/>`;
+    svg += `<path d="${path}" fill="none" stroke="#2563eb" stroke-width="2"/>`;
+    const yMid = (mT + H - mB) / 2;
+    svg += `<text x="14" y="${yMid}" text-anchor="middle" transform="rotate(-90 14 ${yMid})" class="ax">net loss per event</text>`;
+    svg += `<text x="${(mL + W - mR) / 2}" y="${H - 5}" text-anchor="middle" class="ax">exceedance probability  P(L &gt; x)</text></svg>`;
+    const mu = mean(s), sd = Math.sqrt(mean(s.map(v => (v - mu) ** 2)));
+    const pct = q => s[Math.min(n - 1, Math.floor(q * n))];
+    metrics =
+      `<table class="cmp-tbl"><tr><th>metric (Cat ${selCat}, per event)</th><th>value</th></tr>` +
+      `<tr><td>mean</td><td>${fmtM(mu)}</td></tr>` +
+      `<tr><td>std dev · CoV</td><td>${fmtM(sd)} · ${(sd / mu).toFixed(2)}</td></tr>` +
+      `<tr><td>50th / 90th / 99th pct</td><td>${fmtM(pct(0.5))} · ${fmtM(pct(0.9))} · ${fmtM(pct(0.99))}</td></tr>` +
+      `</table>`;
+  } else {
+    // annualized OEP: λ(x) = Σ_c rate_c · P(L_c > x); each sample weight = rate_c/N_c
+    const wsamp = [];
+    let aal = 0;
+    for (const c of cats) {
+      const r = finState.rates[c] || 0, s = sev[c], n = s.length;
+      aal += r * mean(s);
+      s.forEach(loss => wsamp.push({ loss, w: r / n }));
+    }
+    const losses = wsamp.map(s => s.loss);
+    const hi = Math.max(...losses), lo = 0, span = hi || 1;
+    const totFreq = wsamp.reduce((a, s) => a + s.w, 0);
+    const sortAsc = wsamp.slice().sort((a, b) => a.loss - b.loss);
+    const xlogLo = Math.log10(Math.max(1, 1 / totFreq));        // shortest RP shown
+    const xlogHi = Math.log10(Math.max(10, 1 / (sortAsc[0] ? sortAsc[0].w : 0.004)));
+    const xpix = rp => mL + (Math.log10(rp) - xlogLo) / ((xlogHi - xlogLo) || 1) * (W - mL - mR);
+    const ypix = v => mT + (1 - (v - lo) / span) * (H - mT - mB);
+    // build EP points: cumulate weight from the top -> freq -> RP
+    let cum = 0; const pts = [];
+    wsamp.slice().sort((a, b) => b.loss - a.loss).forEach(s => {
+      cum += s.w; const rp = 1 / cum;
+      if (rp >= 1) pts.push([rp, s.loss]);
+    });
+    svg = `<svg viewBox="0 0 ${W} ${H}" width="100%">`;
+    const rpTicks = [2, 5, 10, 25, 50, 100, 250, 500].filter(rp =>
+      Math.log10(rp) >= xlogLo - 1e-9 && Math.log10(rp) <= xlogHi + 1e-9);
+    rpTicks.forEach(rp => {
+      svg += `<line x1="${xpix(rp)}" y1="${mT}" x2="${xpix(rp)}" y2="${H - mB}" stroke="#eef2f7"/>`;
+      svg += `<text x="${xpix(rp)}" y="${H - mB + 16}" text-anchor="middle" class="ax">${rp}</text>`;
+    });
+    for (let t = 0; t <= 4; t++) {
+      const v = lo + (t / 4) * span;
+      svg += `<text x="${mL - 6}" y="${ypix(v) + 3}" text-anchor="end" class="ax">${fmtM(v)}</text>`;
+    }
+    const poly = pts.map(([rp, v]) => `${xpix(rp).toFixed(1)},${ypix(v).toFixed(1)}`).join(" ");
+    svg += `<line x1="${mL}" y1="${ypix(lo)}" x2="${W - mR}" y2="${ypix(lo)}" stroke="#64748b"/>`;
+    svg += `<line x1="${mL}" y1="${mT}" x2="${mL}" y2="${H - mB}" stroke="#64748b"/>`;
+    svg += `<polyline points="${poly}" fill="none" stroke="#2563eb" stroke-width="2"/>`;
+    [50, 100, 250].forEach(rp => {
+      const v = rpLoss(wsamp, 1 / rp);
+      if (Math.log10(rp) >= xlogLo && Math.log10(rp) <= xlogHi)
+        svg += `<circle cx="${xpix(rp).toFixed(1)}" cy="${ypix(v).toFixed(1)}" r="3.2" fill="#ef4444"/>`;
+    });
+    const yMid = (mT + H - mB) / 2;
+    svg += `<text x="14" y="${yMid}" text-anchor="middle" transform="rotate(-90 14 ${yMid})" class="ax">annual loss (OEP)</text>`;
+    svg += `<text x="${(mL + W - mR) / 2}" y="${H - 5}" text-anchor="middle" class="ax">return period (years, log)</text></svg>`;
+    const l100 = rpLoss(wsamp, 1 / 100);
+    const tvar = (() => {                                       // mean loss in the >100-yr tail
+      const tail = wsamp.filter(s => s.loss >= l100);
+      const wt = tail.reduce((a, s) => a + s.w, 0);
+      return wt ? tail.reduce((a, s) => a + s.w * s.loss, 0) / wt : l100;
+    })();
+    metrics =
+      `<table class="cmp-tbl"><tr><th>annual metric</th><th>value</th></tr>` +
+      `<tr><td>AAL (avg annual loss)</td><td>${fmtM(aal)}</td></tr>` +
+      `<tr><td>50 / 100 / 250-yr loss</td><td>${fmtM(rpLoss(wsamp, 1 / 50))} · ${fmtM(l100)} · ${fmtM(rpLoss(wsamp, 1 / 250))}</td></tr>` +
+      `<tr><td>TVaR (100-yr tail)</td><td>${fmtM(tvar)}</td></tr>` +
+      `</table>`;
+  }
+
+  const totalExp = state.grid.n_land * EXPOSURE_VALUE;
+  p.body.innerHTML = controls + svg + metrics +
+    `<p class="note">${model} · severity over 100 input vectors / category · ` +
+    `per-location exposure $${(EXPOSURE_VALUE / 1e3).toFixed(0)}k · total ${fmtM(totalExp)}` +
+    `${finState.mode === "annual" ? " · red dots = 50/100/250-yr losses" : " · Cat " + selCat}` +
+    `<br>Financial terms are scoped to this panel; the map shows ground-up loss.</p>`;
+  wireFinControls(p);
+}
+
+function wireFinControls(p) {
+  p.body.querySelectorAll(".fin-tab").forEach(b =>
+    b.addEventListener("click", () => { finState.mode = b.dataset.mode; drawFinancial(); }));
+  p.body.querySelectorAll("[data-rate]").forEach(inp =>
+    inp.addEventListener("change", () => {
+      finState.rates[+inp.dataset.rate] = Math.max(0, parseFloat(inp.value) || 0);
+      drawFinancial();
+    }));
+  p.body.querySelectorAll("[data-fin]").forEach(inp =>
+    inp.addEventListener("change", () => {
+      finState[inp.dataset.fin] = Math.max(0, parseFloat(inp.value) || 0);
+      drawFinancial();
+    }));
+}
+
 function redrawOpenPanels(modes) {
   (modes || Object.keys(panels)).forEach(mode => {
     if (panels[mode] && panels[mode].el.style.display !== "none") renderPanel(mode);
@@ -719,6 +922,13 @@ function setupAnalysis() {
   document.getElementById("btnProf").addEventListener("click", () => openPanel("prof"));
   document.getElementById("btnCompare").addEventListener("click", () => openPanel("cmp"));
   document.getElementById("btnCDF").addEventListener("click", () => openPanel("cdf"));
+  document.getElementById("btnFin").addEventListener("click", () => openPanel("fin"));
+  // collapsible Statistics / Actuarial groups
+  document.querySelectorAll(".analysis-group").forEach(g =>
+    g.addEventListener("click", () => {
+      g.classList.toggle("open");
+      document.getElementById(g.dataset.grp).classList.toggle("open");
+    }));
   // model / land effect / response change -> invalidate cache + redraw open panels
   ["model", "landEffect", "response"].forEach(id =>
     document.getElementById(id).addEventListener("change", () => {
@@ -730,5 +940,5 @@ function setupAnalysis() {
     () => redrawOpenPanels(["prof", "cmp", "epr"]));
   // category change affects the per-category panels only (SRC/EPR span all cats)
   document.getElementById("category").addEventListener("change",
-    () => redrawOpenPanels(["prof", "cmp", "cdf"]));
+    () => redrawOpenPanels(["prof", "cmp", "cdf", "fin"]));
 }

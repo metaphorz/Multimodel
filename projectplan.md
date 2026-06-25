@@ -464,5 +464,48 @@ The analysis charts had tick numbers but no axis titles. Added them:
   (470x360), cutting off the legend/note. `openPanel` now sizes those panels to
   480x480 (prof/cmp 580x580); verified zero body overflow on all five.
 
+## Loss EP / Financial panel — actuarial layer (2026-06-25) — DONE
+Built and Selenium-tested (`tests/auto/test_financial.py`). Analysis tools regrouped
+into collapsible **Statistics** (SRC/EPR/profiler/compare) and **Actuarial** (%TLC
+CDF + new Loss EP / Financial) menus. The financial panel: Conditional/Annualized
+toggle, per-category event rates, per-location deductible/limit, an EP/OEP curve
+(loss vs return period, 50/100/250-yr markers), and AAL / RP-loss / TVaR metrics —
+all scoped to the panel (map + CSV stay ground-up). Docs: new `\paragraph` + figure
+`analysis_financial.png` (capture uses a taller 700px box); PDF rebuilt. Full
+Selenium suite (financial/mean-max/gridpoint-csv/poi) green.
+
+### Original plan (for reference)
+Adds the third cat-model leg (financial/actuarial) on top of the existing
+hazard (windfield) + vulnerability (MDR) chain. Ships as a **sixth Analysis tool**:
+one new sidebar button + one floating panel, displayed/managed exactly like the
+SRC/EPR/CDF panels (inputs-in-panel precedent = the Interaction Profiler sliders).
+Scoped: the map's Loss colouring and the right-click CSV stay ground-up (untouched).
+
+### Design
+- Panel body = controls (top) + EP plot + metrics table, re-rendered in place on
+  any input change (like the profiler).
+- Controls: **mode** toggle (Conditional | Annualized); per-category **event rate**
+  (events/yr, editable assumptions, greyed in Conditional); per-location
+  **deductible** and **limit** ($).
+- Severity per vector = net TLC$ = Σ_land clamp(MDR·$100k − deductible, 0, limit).
+- **Conditional** (selected category): severity exceedance P(L>x) vs loss; metrics
+  mean / SD / CoV / 50–90–99th-pct event loss.
+- **Annualized** (OEP across cats): exceedance frequency λ(x)=Σ_c rate_c·P(L_c>x);
+  plot loss vs return period (1/λ, log x); metrics AAL=Σ_c rate_c·mean(L_c),
+  50/100/250-yr loss (PML), TVaR at the 100-yr threshold.
+
+### To do
+- [ ] `web/analysis.js`: `finState`; `tlcSeries(model,cat,ded,lim)` (net TLC$ per
+      vector); `drawFinancial()` (controls + EP plot + metrics); register `"fin"`
+      in the panel dispatch; rate/ded/limit/mode inputs wired like profiler sliders.
+- [ ] `index.html`: `#btnFin` ("Loss EP / Financial") in the Analysis section.
+- [ ] `web/analysis.js` `setupAnalysis`: wire `btnFin`→`openPanel("fin")`; add
+      `"fin"` to the model/landEffect and category redraw triggers; size the panel.
+- [ ] `web/style.css`: a few rules for the financial controls row.
+- [ ] Selenium `tests/auto/test_financial.py`: panel opens, EP svg + metrics
+      render, Conditional↔Annualized toggle, deductible change re-renders, no errors.
+- [ ] Docs: Financial/EP paragraph + figure (`analysis_financial.png` via the `_js`
+      hook) in `docs/FormS6.tex`; rebuild PDF.
+
 ## Review
 _(to be filled in as work proceeds)_

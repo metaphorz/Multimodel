@@ -107,11 +107,18 @@
           <option value="mlp">Neural net</option>
         </select>
       </label>
-      <button id="btnSRC" class="analysis-btn">Sensitivity (SRC)</button>
-      <button id="btnEPR" class="analysis-btn">Uncertainty (EPR)</button>
-      <button id="btnProf" class="analysis-btn">Interaction Profiler</button>
-      <button id="btnCompare" class="analysis-btn">Compare metamodels</button>
-      <button id="btnCDF" class="analysis-btn">%TLC CDF</button>
+      <button class="analysis-group" data-grp="grpStats">Statistics</button>
+      <div class="analysis-sub" id="grpStats">
+        <button id="btnSRC" class="analysis-btn">Sensitivity (SRC)</button>
+        <button id="btnEPR" class="analysis-btn">Uncertainty (EPR)</button>
+        <button id="btnProf" class="analysis-btn">Interaction Profiler</button>
+        <button id="btnCompare" class="analysis-btn">Compare metamodels</button>
+      </div>
+      <button class="analysis-group" data-grp="grpAct">Actuarial</button>
+      <div class="analysis-sub" id="grpAct">
+        <button id="btnCDF" class="analysis-btn">%TLC CDF</button>
+        <button id="btnFin" class="analysis-btn">Loss EP / Financial</button>
+      </div>
     </section>
 
     <section id="layers">
