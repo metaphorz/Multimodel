@@ -332,10 +332,10 @@ function createPanel(mode) {
 function openPanel(mode) {
   if (!panels[mode]) {
     panels[mode] = createPanel(mode);
-    if (mode === "prof" || mode === "cmp") {
-      panels[mode].el.style.width = "580px";
-      panels[mode].el.style.height = "540px";
-    }
+    // size so the full plot + axis titles + legend + note fit without resizing
+    const big = mode === "prof" || mode === "cmp";
+    panels[mode].el.style.width = big ? "580px" : "480px";
+    panels[mode].el.style.height = big ? "580px" : "480px";
   }
   panels[mode].el.style.display = "flex";
   bringFront(panels[mode].el);

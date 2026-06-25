@@ -460,6 +460,9 @@ The analysis charts had tick numbers but no axis titles. Added them:
   time series: "wind (mph) vs time" + hour ticks) — left as-is.
 - `docs/capture_figures.py`: added an optional name filter so a change can refresh
   just its figures. Regenerated analysis_src/epr/profiler/tlc_cdf/compare; rebuilt PDF.
+- Follow-up: the taller labeled charts overflowed the default SRC/EPR/CDF panel
+  (470x360), cutting off the legend/note. `openPanel` now sizes those panels to
+  480x480 (prof/cmp 580x580); verified zero body overflow on all five.
 
 ## Review
 _(to be filled in as work proceeds)_
