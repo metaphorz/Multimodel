@@ -9,6 +9,7 @@ const state = {
   powellUa: null,         // Powell UA-sheet outputs for faithful EPR
   vuln: null,             // vulnerability curve {xs, mdr} (MDR vs 3-sec gust)
   roughness: null,        // per-point marine->land multiplier
+  exposure: null,         // Census exposure per vertex {values, total} (ACS home value)
   map: null,
   markers: [],            // circleMarker per grid point, in grid.json order
   wind: null,             // Float array of current per-point wind (mph)
@@ -100,8 +101,31 @@ function windColor(mph) {
 }
 
 // ---- loss (vulnerability curve) ------------------------------------------
-const EXPOSURE_VALUE = 100000;   // $ per land vertex (ROA p.186)
+const EXPOSURE_VALUE = 100000;   // $ per land vertex, Uniform model (ROA p.186)
 const GUST_FACTOR = 1.0;         // peak surface wind -> 3-sec gust input (adjustable)
+
+// ---- exposure model ------------------------------------------------------
+// Uniform: one $100k home at every land vertex. Census: aggregate ACS home value
+// in each vertex's 3-mi cell (state.exposure, from exposure_census.json).
+function exposureMode() {
+  const el = document.getElementById("exposureModel");
+  return el ? el.value : "uniform";
+}
+function exposureAt(i) {                              // $ exposure at land vertex i
+  if (exposureMode() === "census" && state.exposure) return state.exposure.values[i] || 0;
+  return state.grid.points[i].land ? EXPOSURE_VALUE : 0;
+}
+function totalExposure() {                            // $ over all land vertices
+  if (exposureMode() === "census" && state.exposure) return state.exposure.total;
+  return state.grid.n_land * EXPOSURE_VALUE;
+}
+// adaptive $ formatter — census totals reach billions, uniform stays in millions
+function fmtMoney(d) {
+  if (d >= 1e9) return `$${(d / 1e9).toFixed(2)}B`;
+  if (d >= 1e6) return `$${(d / 1e6).toFixed(2)}M`;
+  if (d >= 1e3) return `$${(d / 1e3).toFixed(0)}k`;
+  return `$${Math.round(d)}`;
+}
 
 // MDR at a wind speed, linear-interpolated from the vulnerability curve
 function mdrAt(windMph) {
@@ -247,8 +271,8 @@ function computeMeanWind(model, cat) {
 // Right-click a grid point -> per-point loss-cost CSV over all 100 input vectors.
 // 9 columns: CP, Rmax, VT, WSP, CF, FFP, MaxWind_mph, %LC(i,x,y), %TLC(i)
 //   MaxWind_mph = peak wind at this point for input vector i (drives %LC)
-//   %LC(i,x,y)  = LC(i,x,y) / EXPOSURE_VALUE   (loss cost at this point / $/vertex)
-//   TLC(i)      = sum_x sum_y LC(i,x,y)         (total loss cost over all land points)
+//   %LC(i,x,y)  = LC(i,x,y) / exposure(x,y) = MDR at this point (exposure-agnostic ratio)
+//   TLC(i)      = sum_x sum_y LC(i,x,y) = sum_land MDR * exposure   (active exposure model)
 //   %TLC(i)     = TLC(i) / (total exposure)
 function downloadGridPointCsv(idx) {
   if (!state.inputs || !state.vuln) { alert("Need inputs + vulnerability curve loaded for a loss-cost CSV."); return; }
@@ -256,7 +280,7 @@ function downloadGridPointCsv(idx) {
   const recs = state.inputs[cat] || [];
   const pt = state.grid.points[idx];
   const cols = ["CP", "Rmax", "VT", "WSP", "CF", "FFP"];
-  const totalExposure = state.grid.n_land * EXPOSURE_VALUE;
+  const totalExp = totalExposure();
   const rows = [[...cols, "MaxWind_mph", "%LC", "%TLC"].join(",")];
   for (let v = 0; v < recs.length; v++) {
     const w = computeWindFor(model, cat, v);
@@ -265,10 +289,10 @@ function downloadGridPointCsv(idx) {
       return;
     }
     const wind = w[idx];                           // peak wind at this point for vector i
-    const pctLC = pt.land ? mdrAt(wind) : 0;       // LC/EXPOSURE_VALUE = MDR on land, 0 on water
+    const pctLC = pt.land ? mdrAt(wind) : 0;       // LC/exposure = MDR on land, 0 on water
     let tlc = 0;
-    state.grid.points.forEach((q, j) => { if (q.land) tlc += mdrAt(w[j]) * EXPOSURE_VALUE; });
-    rows.push([...cols.map(c => recs[v][c]), wind, pctLC, tlc / totalExposure].join(","));
+    state.grid.points.forEach((q, j) => { if (q.land) tlc += mdrAt(w[j]) * exposureAt(j); });
+    rows.push([...cols.map(c => recs[v][c]), wind, pctLC, tlc / totalExp].join(","));
   }
   const blob = new Blob([rows.join("\n")], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
@@ -353,7 +377,7 @@ function pointInfoHTML(i) {
     wtxt = `<b>${w.toFixed(1)} mph</b>${agg ? ` (${agg} of 100)` : ""}`;
     if (state.vuln && state.grid.points[i].land) {
       const mdr = mdrAt(w);
-      wtxt += ` &middot; loss <b>${(mdr * 100).toFixed(1)}%</b> ($${Math.round(mdr * EXPOSURE_VALUE).toLocaleString()})`;
+      wtxt += ` &middot; loss <b>${(mdr * 100).toFixed(1)}%</b> ($${Math.round(mdr * exposureAt(i)).toLocaleString()})`;
     }
     wtxt += "<br>";
   }
@@ -468,7 +492,7 @@ function updateField() {
       if (p.land && sens && sens[i] >= 0) n++;
     } else if (lossMode) {
       const mdr = w != null ? mdrAt(w) : null;
-      if (mdr != null && p.land) { lossTotal += mdr * EXPOSURE_VALUE; if (w > wmax) wmax = w; n++; }
+      if (mdr != null && p.land) { lossTotal += mdr * exposureAt(i); if (w > wmax) wmax = w; n++; }
     } else if (w != null) {                          // wind mode
       if (w > wmax) wmax = w; if (p.land) { wsum += w; n++; }
     }
@@ -498,9 +522,9 @@ function updateField() {
               `${currentSelection().cat.toUpperCase()} ` +
               `${aggLabel() ? aggLabel() + " (100 vectors)" : "v" + document.getElementById("vector").value}`;
   if (lossMode && wind && state.vuln) {
-    const pct = lossTotal / (state.grid.n_land * EXPOSURE_VALUE) * 100;
-    info.innerHTML = `${tag}<br>Loss over ${n} land pts <b>$${(lossTotal / 1e6).toFixed(2)}M</b>` +
-      `<br>= <b>${pct.toFixed(2)}%</b> of $${(state.grid.n_land * EXPOSURE_VALUE / 1e6).toFixed(1)}M exposure`;
+    const pct = lossTotal / totalExposure() * 100;
+    info.innerHTML = `${tag}<br>Loss over ${n} land pts <b>${fmtMoney(lossTotal)}</b>` +
+      `<br>= <b>${pct.toFixed(2)}%</b> of ${fmtMoney(totalExposure())} exposure (${exposureMode()})`;
   } else if (lossMode && kdPending) {
     info.textContent = "Powell Kaplan–DeMaria field: precompute pending.";
   } else if (lossMode) {
@@ -524,7 +548,7 @@ function updateField() {
 
 // ---- controls ------------------------------------------------------------
 function wireControls() {
-  ["model", "category", "colorBy", "bdist", "display"].forEach(id =>
+  ["model", "category", "colorBy", "bdist", "display", "exposureModel"].forEach(id =>
     document.getElementById(id).addEventListener("change", () => {
       if (id === "bdist") bParamInputs(document.getElementById("bdist").value);
       if (id === "model") syncBDistEnabled();
@@ -593,6 +617,8 @@ async function init() {
     state.inputs = await (await fetch("../outputs/web/inputs.json", NC)).json();
     try { state.roughness = await (await fetch("../outputs/web/roughness.json", NC)).json(); }
     catch (e) { state.roughness = null; }
+    try { state.exposure = await (await fetch("../outputs/web/exposure_census.json", NC)).json(); }
+    catch (e) { state.exposure = null; }   // Census exposure (ACS); Uniform works without it
     try { state.powellKd = await (await fetch("../outputs/web/powell_kd.json", NC)).json(); }
     catch (e) { state.powellKd = null; }   // generated after the UA run
     try { state.powellField = await (await fetch("../outputs/web/powell_field.json", NC)).json(); }
@@ -607,6 +633,11 @@ async function init() {
     setupHover();
     setupAnalysis();
     setupPoi();
+    // disable the Census exposure option if its JSON wasn't generated
+    if (!state.exposure) {
+      const opt = document.querySelector('#exposureModel option[value="census"]');
+      if (opt) { opt.disabled = true; opt.textContent += " — run build_exposure.py"; }
+    }
     // powell.json may still be precomputing; load if present
     try {
       state.powell = await (await fetch("../outputs/web/powell.json", NC)).json();

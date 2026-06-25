@@ -58,11 +58,11 @@ function responseVar() {
 // (TLC = Σ_land MDR·$100k, total exposure = 682·$100k = $68.2M; ROA definition).
 function pctTLC(wind) {
   if (!wind || typeof wind === "string" || !state.vuln) return null;
-  let s = 0, n = 0;
+  let loss = 0, any = false;
   state.grid.points.forEach((p, i) => {
-    if (p.land) { const m = mdrAt(wind[i]); if (m != null) { s += m; n++; } }
+    if (p.land) { const m = mdrAt(wind[i]); if (m != null) { loss += m * exposureAt(i); any = true; } }
   });
-  return n ? (s / n) * 100 : null;
+  return any ? loss / totalExposure() * 100 : null;   // value-weighted under Census
 }
 
 // scalar output metric per vector for the current Response selector
@@ -667,15 +667,17 @@ function tlcSeries(model, cat, ded, lim) {
     let tlc = 0;
     state.grid.points.forEach((p, j) => {
       if (!p.land) return;
-      const lc = mdrAt(w[j]) * EXPOSURE_VALUE;
-      tlc += Math.min(Math.max(lc - ded, 0), lim);
+      const lc = mdrAt(w[j]) * exposureAt(j);         // ground-up per-location loss
+      let net = Math.max(lc - ded, 0);                // deductible
+      if (lim != null) net = Math.min(net, lim);      // optional per-location limit
+      tlc += net;
     });
     out.push(tlc);
   }
   return out;
 }
 
-const fmtM = d => `$${(d / 1e6).toFixed(2)}M`;
+const fmtM = d => fmtMoney(d);   // adaptive $ (B/M/k), shared with viewer.js
 
 // loss at a target annual exceedance frequency from rate-weighted event samples
 // (each sample contributes annual frequency weight; invert the descending λ(x))
@@ -692,7 +694,6 @@ function rpLoss(samples, targetFreq) {
 function drawFinancial() {
   const p = panels["fin"];
   if (!p || p.el.style.display === "none") return;
-  if (finState.lim == null) finState.lim = EXPOSURE_VALUE;
   const model = document.getElementById("model").value;
   const selCat = document.getElementById("category").value;
   p.title.textContent = "Loss EP / Financial";
@@ -710,7 +711,8 @@ function drawFinancial() {
     `</div>` +
     `<div class="fin-terms">` +
     `<label>Deductible $<input type="number" step="1000" min="0" data-fin="ded" value="${finState.ded}"/></label>` +
-    `<label>Limit $<input type="number" step="1000" min="0" data-fin="lim" value="${finState.lim}"/></label>` +
+    `<label>Limit $<input type="number" step="1000" min="0" data-fin="lim" ` +
+    `placeholder="no cap" value="${finState.lim == null ? "" : finState.lim}"/></label>` +
     `</div></div>`;
 
   // gather net-loss severity samples per category
@@ -822,12 +824,12 @@ function drawFinancial() {
       `</table>`;
   }
 
-  const totalExp = state.grid.n_land * EXPOSURE_VALUE;
   p.body.innerHTML = controls + svg + metrics +
     `<p class="note">${model} · severity over 100 input vectors / category · ` +
-    `per-location exposure $${(EXPOSURE_VALUE / 1e3).toFixed(0)}k · total ${fmtM(totalExp)}` +
+    `exposure: ${exposureMode()} · total ${fmtM(totalExposure())}` +
     `${finState.mode === "annual" ? " · red dots = 50/100/250-yr losses" : " · Cat " + selCat}` +
-    `<br>Financial terms are scoped to this panel; the map shows ground-up loss.</p>`;
+    `<br>Deductible/limit are per-location (under Census, a location is the cell ` +
+    `aggregate). Terms are scoped to this panel; the map shows ground-up loss.</p>`;
   wireFinControls(p);
 }
 
@@ -841,7 +843,10 @@ function wireFinControls(p) {
     }));
   p.body.querySelectorAll("[data-fin]").forEach(inp =>
     inp.addEventListener("change", () => {
-      finState[inp.dataset.fin] = Math.max(0, parseFloat(inp.value) || 0);
+      const blank = inp.value.trim() === "";
+      // blank Limit = no cap (null); deductible blank = 0
+      finState[inp.dataset.fin] = (blank && inp.dataset.fin === "lim")
+        ? null : Math.max(0, parseFloat(inp.value) || 0);
       drawFinancial();
     }));
 }
@@ -929,8 +934,8 @@ function setupAnalysis() {
       g.classList.toggle("open");
       document.getElementById(g.dataset.grp).classList.toggle("open");
     }));
-  // model / land effect / response change -> invalidate cache + redraw open panels
-  ["model", "landEffect", "response"].forEach(id =>
+  // model / land effect / response / exposure change -> invalidate cache + redraw
+  ["model", "landEffect", "response", "exposureModel"].forEach(id =>
     document.getElementById(id).addEventListener("change", () => {
       analysisState.cache = null;
       redrawOpenPanels();

@@ -507,5 +507,81 @@ Scoped: the map's Loss colouring and the right-click CSV stay ground-up (untouch
 - [ ] Docs: Financial/EP paragraph + figure (`analysis_financial.png` via the `_js`
       hook) in `docs/FormS6.tex`; rebuild PDF.
 
+## Exposure module: swappable Uniform / Census exposure (2026-06-25) — DONE
+Built and Selenium-tested. The 4th cat-model leg is now swappable via an **Exposure
+model** selector (Uniform $100k/vertex | Census ACS home value), parallel to the
+Windfield and Damage selectors. Decisions per user: Option A (aggregate),
+ratio-form %LC, deductible/limit kept-and-labelled.
+- `pipeline/build_exposure.py` (new): ACS B25082 (FL tracts) → join TIGER polygons
+  by GEOID → areal value-density apportionment to the 682 grid cells →
+  `outputs/web/exposure_census.json` (9 KB). Raw GIS stays outside the repo
+  (`EXPOSURE_SHP` env override). Result: $572.2B total, max/median ≈ 1572×.
+- `web/viewer.js`: `exposureAt(i)` / `totalExposure()` / adaptive `fmtMoney`;
+  loads `exposure_census.json`; replaced all scalar `EXPOSURE_VALUE` loss sites;
+  Census option self-disables if the JSON is absent.
+- `web/analysis.js`: `pctTLC` now value-weighted; `tlcSeries` uses `exposureAt`
+  + null-limit = no-cap; financial notes reflect the active exposure model.
+- `index.html`: Exposure model selector; both files wire its change to
+  `updateField` + panel redraw.
+- Reconciliation verified: Uniform → $68.2M / %TLC 28.27% (unchanged); Census →
+  $572.2B / %TLC 24.74%; AAL millions → billions. Map MDR colouring is
+  exposure-independent (by design).
+- Tests: `tests/auto/test_exposure.py` (new) + `test_financial.py` (adaptive $
+  parsing); full suite green (exposure/financial/gridpoint-csv/mean-max/poi).
+- `requirements.txt` added (geopandas/shapely/pyproj/pandas/…). Docs: Exposure-module
+  paragraph in §loss; PDF rebuilt.
+
+### Original plan (for reference)
+
+### Goal
+Add the catastrophe model's 4th leg — **Exposure** — as a swappable input, parallel
+to the Windfield and Damage selectors. Today exposure is the scalar
+`EXPOSURE_VALUE = $100k` at every land vertex; add a **Census (ACS)** set giving the
+*actual* aggregate home value at each grid point. Same architecture as everything
+else: heavy GIS work offline → small per-vertex JSON → browser selects. Pages is
+unaffected (the client only ever sees a 682-number array, a few KB).
+
+### Data
+- ACS 5-yr via the Census API, Florida tracts:
+  `…/2022/acs/acs5?get=NAME,B25082_001E,B25001_001E&for=tract:*&in=state:12`
+  (`B25082_001E` = aggregate owner-occupied home value $; `B25001_001E` = units).
+- TIGER FL tract polygons already on disk: `~/code/weather/GIS/census_tl_2021_12_tract/
+  tl_2021_12_tract.shp` (join to ACS by `GEOID`). **Raw GIS stays outside the repo**
+  (gitignored); only the derived JSON is committed.
+
+### To do
+- [ ] `pipeline/build_exposure.py`: fetch ACS → join to tract polygons by GEOID →
+      compute tract value density ($/land-km²) → **areal-apportion** to each grid
+      cell (3-mi box ∩ tracts, land area only) → write
+      `outputs/web/exposure_census.json` = `{ values:[…682], total, meta }`.
+      Prereqs: geopandas / shapely / requests (verify in venv).
+- [ ] `web/viewer.js`: load `exposure_census.json` (try/catch like roughness);
+      add `exposureAt(i)` (uniform $100k vs census[i]) and `totalExposure()`
+      (n_land·$100k vs Σ census); replace the 13 `EXPOSURE_VALUE` call sites in
+      viewer.js + analysis.js with these.
+- [ ] `index.html`: **Exposure model** selector under Damage model
+      (`Uniform ($100k / vertex)` | `Census (ACS home value)`); wire change →
+      `updateField()` + redraw analysis/financial panels.
+- [ ] `web/style.css`: none expected (reuses section styling).
+- [ ] Test `tests/auto/test_exposure.py`: Uniform total reconciles to $68.2M;
+      Census total is a sane statewide-footprint figure and is non-uniform
+      (coast ≫ inland); loss map + financial panel re-render on switch; no errors.
+- [ ] Docs: Exposure-module paragraph + a before/after loss-map figure; rebuild PDF.
+
+### Decisions to confirm (flagged — these change semantics)
+1. **%LC / %TLC normalization.** Cleanest under non-uniform exposure:
+   `%LC = LC_j / exposure_j` (= MDR, exposure-agnostic) and
+   `%TLC = ΣLC / Σexposure`. The statistician's original %LC used a fixed
+   `/$100,000`; under Census that would re-scale by `exposure_j/100k`. Propose the
+   ratio form; flag for the statistician.
+2. **Deductible / limit under Census.** A census cell is an *aggregate* of many
+   homes, not one policy, so per-location deductible/limit are less meaningful.
+   Propose: keep them but note they act on the aggregate cell (or grey them in
+   Census mode). Confirm preference.
+3. **Apportionment method.** Areal value-density apportionment (accurate) vs simple
+   point-in-polygon (coarser). Plan uses areal; say if you'd rather start simple.
+4. **Renter/commercial.** `B25082` is owner-occupied only. v1 ships that as a
+   labeled proxy; renter/commercial scaling is a later refinement.
+
 ## Review
 _(to be filled in as work proceeds)_

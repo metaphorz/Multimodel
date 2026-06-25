@@ -193,12 +193,33 @@ for the masonry, gable, no-shutter structure, generated from the HAZUS/ARA tool.
 \label{fig:vuln}
 \end{figure}
 
-Per-vertex loss is $\text{loss}=\text{MDR}(\text{peak wind})\times\$100{,}000$;
+Per-vertex loss is $\text{loss}=\text{MDR}(\text{peak wind})\times\text{exposure}_{x,y}$;
 the expected loss as a percent of exposure is the total over the 682 land vertices
-divided by $\$68{,}200{,}000$ ($=682\times\$100{,}000$). The viewer colours the
-grid by MDR, reports total loss (\$M) and \% exposure, and the hover popup shows
+divided by the total exposure. The viewer colours the
+grid by MDR, reports total loss and \% exposure, and the hover popup shows
 loss \% and dollars beside the peak wind. Figure~\ref{fig:kdloss} shows Category~5
 Kaplan--DeMaria-decayed wind (left) and the corresponding loss field (right).
+
+\paragraph{Exposure model (the 4th module).}
+Exposure---\emph{how much insured value sits at each location}---is the fourth
+catastrophe-model leg alongside hazard, vulnerability, and finance, and the sidebar
+exposes it as a swappable \textbf{Exposure model} selector under the damage model.
+\emph{Uniform} is the ROA baseline: one identical \$100{,}000 home at every land
+vertex, total $\$68.2$M. \emph{Census} replaces that with the \emph{actual}
+aggregate home value in each vertex's 3-mile cell, built offline
+(\texttt{pipeline/build\_exposure.py}) from the American Community Survey (ACS
+5-year table B25082, aggregate owner-occupied value) areal-apportioned from Florida
+TIGER tract polygons onto the grid (the heavy GIS stays in the pipeline; only a
+small per-vertex JSON reaches the browser). For the Southern-Florida footprint the
+Census total is $\approx\$572$B, and value is sharply concentrated---the densest
+Miami cell carries $\sim$1500$\times$ the median cell---so loss becomes weighted by
+\emph{where value actually is}, not merely by mean damage: $\%\text{TLC}$ for the
+Category~5 example shifts from $28.3\%$ (Uniform) to $24.7\%$ (Census), and the
+financial panel's AAL/return-period losses rescale from millions to billions. The
+exposure model feeds the loss totals, the per-point CSV ($\%\text{TLC}$), the
+CDF, and the financial panel consistently; per-point MDR (and hence the map
+colouring) is exposure-independent. (Caveat: ACS market value is owner-occupied
+only and is a proxy for insured replacement cost.)
 
 \begin{figure}[H]
 \centering

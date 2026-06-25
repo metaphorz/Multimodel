@@ -23,12 +23,14 @@ URL = "http://localhost:8012/web/index.html"
 
 
 def money(driver, label_substr):
-    # return the first $M value in the metrics row whose first cell contains label
+    # return the first $ value (in dollars) in the metrics row whose label matches;
+    # values are adaptively formatted as $X.XXB / $X.XXM / $Xk
+    mult = {"B": 1e9, "M": 1e6, "k": 1e3}
     for tr in driver.find_elements(By.CSS_SELECTOR, ".analysis-panel .cmp-tbl tr"):
         tds = tr.find_elements(By.TAG_NAME, "td")
         if len(tds) == 2 and label_substr in tds[0].text:
-            m = re.search(r"\$([\d.]+)M", tds[1].text)
-            return float(m.group(1)) if m else None
+            m = re.search(r"\$([\d.]+)([BMk])", tds[1].text)
+            return float(m.group(1)) * mult[m.group(2)] if m else None
     return None
 
 
@@ -64,7 +66,7 @@ def main():
             failures.append("AAL metric missing in annualized mode")
         if rp is None:
             failures.append("return-period loss metric missing")
-        print(f"annualized: AAL=${aal}M  50yr=${rp}M  svgs={n_svg}")
+        print(f"annualized: AAL=${aal/1e6:.2f}M  50yr=${rp/1e6:.2f}M  svgs={n_svg}")
 
         # 3. conditional toggle
         d.execute_script("[...document.querySelectorAll('.fin-tab')]"
@@ -84,7 +86,7 @@ def main():
                          "i.value=20000; i.dispatchEvent(new Event('change'));")
         time.sleep(1.0)
         aal1 = money(d, "AAL")
-        print(f"AAL: ${aal0}M -> ${aal1}M with $20k deductible")
+        print(f"AAL: ${aal0/1e6:.2f}M -> ${aal1/1e6:.2f}M with $20k deductible")
         if not (aal1 < aal0):
             failures.append(f"deductible did not reduce AAL ({aal0} -> {aal1})")
 
