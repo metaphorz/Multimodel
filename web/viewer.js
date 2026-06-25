@@ -501,6 +501,7 @@ function wireControls() {
   ["model", "category", "colorBy", "bdist", "display"].forEach(id =>
     document.getElementById(id).addEventListener("change", () => {
       if (id === "bdist") bParamInputs(document.getElementById("bdist").value);
+      if (id === "model") syncBDistEnabled();
       updateField();
     }));
 
@@ -536,6 +537,16 @@ function wireControls() {
   });
 
   bParamInputs(document.getElementById("bdist").value);
+  syncBDistEnabled();
+}
+
+// the WSP->B distribution only feeds the live Holland/Willoughby models; Powell
+// is precomputed and ignores B, so grey the control out when Powell is selected.
+function syncBDistEnabled() {
+  const powell = document.getElementById("model").value === "powell";
+  document.getElementById("bsection").classList.toggle("disabled", powell);
+  document.getElementById("bdist").disabled = powell;
+  document.querySelectorAll("#bparams input").forEach(i => i.disabled = powell);
 }
 
 // ---- init ----------------------------------------------------------------

@@ -23,6 +23,10 @@ body { display: flex; }
   border: 1px solid #2c3947; border-radius: 4px; }
 #info { font-size: 12px; line-height: 1.5; color: #c5d2de; }
 
+.bnote { font-size: 11px; color: #8fa3b6; margin: 8px 0 0; font-style: italic; }
+#bsection.disabled { opacity: .5; }
+#bsection.disabled select, #bsection.disabled input { cursor: not-allowed; }
+
 #legend { margin-top: 8px; }
 #legend .lg { display: flex; align-items: center; font-size: 11px; color: #c5d2de; margin: 2px 0; }
 #legend .lg span { width: 14px; height: 14px; border-radius: 3px; margin-right: 6px;
