@@ -599,5 +599,70 @@ matrix.
 - Docs: Interaction-matrix paragraph + figure `analysis_matrix.png`
   (capture `_js` toggles to the matrix tab; +1s settle before `_js`); PDF rebuilt.
 
+## Single-point vs footprint response for profiler / matrix (2026-06-26) — DONE
+Built and Selenium-tested. A **Footprint mean ↔ Single point** toggle in the
+profiler/matrix; single-point picks a vertex by **map click** and recomputes via
+**direct wind-field simulation** (live models, None/Roughness), preserving the true
+S-shape a quadratic metamodel rounds away. Confirmed: footprint Rmax = 0 inflections
+(concave); single-point (6,33) = 1 inflection (S); Powell/KD show a note.
+- `web/analysis.js`: `profilerState` {scale,pt,picking,marker,pred}; `pointResponse`,
+  `profilerPredictor`, `profilerPickPoint`; predictor parametrized so profiler/matrix
+  use metamodel (footprint) or direct sim (point); scale toggle + "Pick on map".
+- `web/viewer.js`: map-click routes to `profilerPickPoint` when picking.
+- `web/style.css`: scale toggle, pick button, crosshair pin.
+- Test `tests/auto/test_point_response.py` (S vs concave, matrix in point mode, Powell
+  note). Docs: single-point §+ figure `analysis_matrix_point.png`; PDF rebuilt.
+
+### Original plan (for reference)
+
+### Goal
+A response-scale toggle so the Interaction Profiler and the Interaction matrix can
+show either the **footprint-mean** response (concave) or a **single grid point's**
+response (S-shaped), demonstrating that spatial resolution changes the shape of the
+loss response and the apparent interactions. Confirmed empirically: a single vertex's
+MDR-vs-Rmax is a clean S (517/682 land points are S-shaped; e.g. Boca Raton (6,33):
+0.001 → steep → 0.305), while the 682-point mean is concave (staggered sigmoids
+average out).
+
+### Key design decision (why DIRECT simulation, not a metamodel)
+The single-point loss curve is S-shaped, but the second-order RSM **cannot represent
+an inflection** — fitting an RSM per point would round the S away, and GPR/NN are
+only precomputed for the aggregate config. So **single-point mode plots the response
+computed directly from the wind-field model** (sweep one input, others at their means,
+peak wind at the chosen vertex → MDR), exactly the computation validated in the
+spatial-scale test. **Footprint mode keeps the existing metamodel** (unchanged).
+
+### Constraints
+- Direct sweeps need a model that recomputes for arbitrary inputs → **Holland /
+  Willoughby only**. Powell is precomputed per-vector and can't sweep, so single-point
+  mode shows a short note for Powell (switch to a live model).
+- Cheap: evaluate peak wind at the **one** chosen vertex (reuse `pointTimeSeries`),
+  not the full 840-point field. Matrix worst case ≈ 30 cells × 24 steps × 2 ≈ 1440
+  single-point evals — sub-second.
+
+### To do
+- [ ] `web/analysis.js`: `profilerState.scale` ("footprint" | "point") and
+      `profilerState.pt` (ew,ns); a **Footprint mean | Single point** toggle plus an
+      (ew,ns) box shown in point mode. A direct evaluator
+      `pointResponse(model, rec)` = peak wind (or its MDR) at the chosen vertex.
+      In point mode, the profiler curves and the matrix cells sweep inputs through
+      `pointResponse` instead of `mm.predict`; y-range from the direct response;
+      header labels it "direct simulation (metamodel N/A)". Powell → note.
+- [ ] `index.html` / `style.css`: the scale toggle + coord box (reuse existing styles).
+- [ ] Test `tests/auto/test_point_response.py`: single-point profiler/matrix shows
+      ≥1 inflection (S) for Rmax at a transitional vertex while footprint is concave;
+      Powell shows the note; no console errors.
+- [ ] Docs: extend the interaction-matrix section with the single-point vs footprint
+      comparison (the S vs concave) + a figure; rebuild PDF.
+
+### Open questions (flagged)
+1. **Point selection:** a coordinate (ew,ns) box in the panel (default e.g. 6,33),
+   a dropdown of the current **Points of Interest**, or map-click. Plan assumes a
+   coord box (self-contained); say if you'd rather tie it to POIs.
+2. **Metric in point mode:** reuse the existing Response selector — `wind` → peak
+   wind at the point; `loss` → MDR at the point (per-point %LC, the S-shaped one).
+3. **Metamodel selector** is hidden/ignored in point mode (it's direct simulation);
+   restored in footprint mode.
+
 ## Review
 _(to be filled in as work proceeds)_

@@ -94,6 +94,12 @@ body.theme-light .analysis-group:hover { background: #d4dce5; }
 .prof-tab { flex: 1; padding: 5px; cursor: pointer; font-size: 12px;
   background: #e2e8f0; color: #1c2530; border: none; border-radius: 5px; }
 .prof-tab.active { background: #2563eb; color: #fff; }
+.prof-pick { padding: 5px 9px; cursor: pointer; font-size: 12px; background: #fff;
+  color: #2563eb; border: 1px solid #2563eb; border-radius: 5px; }
+.prof-pick.active { background: #2563eb; color: #fff; }
+.prof-ptlbl { font-size: 11px; color: #475569; align-self: center; }
+.prof-pin { color: #7c3aed; font-size: 16px; font-weight: 700; line-height: 22px;
+  text-align: center; text-shadow: 0 0 2px #fff, 0 0 2px #fff; }
 .prof-axis { font-size: 11px; color: #475569; margin: 2px 0 6px; }
 .prof-axis b { color: #1c2530; }
 .prof-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }

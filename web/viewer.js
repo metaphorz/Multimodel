@@ -427,7 +427,13 @@ function setupHover() {
       const dx = pts[i].x - cp.x, dy = pts[i].y - cp.y, d = dx * dx + dy * dy;
       if (d < bd) { bd = d; best = i; }
     }
-    if (best >= 0) openWindfieldPopup(best);
+    if (best < 0) return;
+    // when the profiler is in single-point "pick" mode, a click selects the vertex
+    if (typeof profilerState !== "undefined" && profilerState.picking) {
+      profilerPickPoint(best);
+      return;
+    }
+    openWindfieldPopup(best);
   });
   // right-click the nearest dot -> per-point loss-cost CSV (100 input vectors)
   state.map.on("contextmenu", e => {

@@ -324,6 +324,36 @@ red/blue indicates an $r\times c$ interaction.}
 \label{fig:matrix}
 \end{figure}
 
+\paragraph{Single point vs.\ footprint (spatial scale).}
+A second toggle, \textbf{Footprint mean\,$\,\leftrightarrow\,$Single point}, changes the
+spatial scale of the response and exposes a subtle but important effect. In
+\emph{footprint} mode the response is the $682$-vertex mean (the metamodel above). In
+\emph{single point} mode the user clicks a grid vertex on the map and the curves are
+recomputed by \emph{direct wind-field simulation} at that one location---peak wind
+there, optionally through the damage curve for $\%\text{LC}$---rather than a metamodel,
+because a quadratic surface cannot represent the inflection that appears point-wise.
+The contrast is instructive: the loss-vs-$R_{\max}$ response at a single off-track
+vertex is a clean \textbf{S} (Figure~\ref{fig:matrixpt}), as the growing eyewall sweeps
+the point through the steep middle of the damage sigmoid, whereas the footprint mean is
+\emph{concave}---averaging $682$ vertices, each crossing that sigmoid at a different
+$R_{\max}$, smooths the S into a saturating ramp ($517$ of the $682$ land points are
+individually S-shaped). Spatial resolution thus changes both the shape of the loss
+response and the apparent strength of its interactions---a concrete cautionary lesson
+for catastrophe-model interpretation. Single-point mode requires a live model
+(Holland/Willoughby) with land effect None or roughness; Powell and Kaplan--DeMaria
+show a short note.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\textwidth]{analysis_matrix_point.png}
+\caption{Single-point interaction matrix (Holland, Category~5, vertex $(6,33)$ Boca
+Raton, $Y=\%\text{LC}$ at the point, direct simulation). The $R_{\max}$ column is
+visibly \textbf{S-shaped}---contrast the concave footprint-mean version in
+Figure~\ref{fig:matrix}. The sigmoid that survives at a single location averages out
+over the full footprint.}
+\label{fig:matrixpt}
+\end{figure}
+
 \paragraph{Loss-cost distribution.}
 A companion panel plots the empirical CDF of $\%\text{TLC}(i)$ over the $100$
 vectors for the selected category (the ROA's Fig.~5 analogue), summarizing the

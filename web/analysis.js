@@ -18,7 +18,12 @@ const VAR_COLORS = {
   WSP: "#111827", CF: "#ef4444", FFP: "#7c3aed",
 };
 const analysisState = { mode: null, cache: null };  // mode: 'src' | 'epr'
-const profilerState = { mm: null, ref: null, view: "profiler" };  // +view: profiler|matrix
+const profilerState = {           // metamodel + reference point + view/scale state
+  mm: null, ref: null, view: "profiler",      // view: profiler | matrix
+  scale: "footprint",             // footprint (metamodel) | point (direct simulation)
+  pt: null, picking: false, marker: null,     // single-point selection (map click)
+  pred: null,                     // active predictor {predict, ymin, ymax, available}
+};
 
 // ---- linear algebra ------------------------------------------------------
 function mean(a) { return a.reduce((s, v) => s + v, 0) / a.length; }
@@ -466,27 +471,98 @@ function drawProfiler() {
   buildProfilerDOM();
 }
 
+// direct single-point response (no metamodel): peak wind at the picked vertex for an
+// input record, or its MDR (per-point %LC, in %) when the loss response is active.
+// This preserves the true S-shape that a quadratic metamodel would round away.
+function pointResponse(model, rec, pt) {
+  const B = quantileToB(rec.WSP);
+  const land = document.getElementById("landEffect").value;
+  const opts = {};
+  if (land === "roughness" && state.roughness) opts.factor = state.roughness.factors[pt.idx];
+  const ts = pointTimeSeries(model, rec, B, pt.ew, pt.ns, opts);
+  let peak = 0; for (const w of ts.w) if (w > peak) peak = w;
+  if (responseVar() === "tlc") { const m = mdrAt(peak); return m == null ? 0 : m * 100; }
+  return peak;
+}
+
+// pick the predictor for the active scale. footprint -> metamodel; single point ->
+// direct wind-field simulation at the picked vertex (live models, None/Roughness only).
+function profilerPredictor() {
+  const mm = profilerState.mm, model = document.getElementById("model").value;
+  if (profilerState.scale !== "point")
+    return { available: true, predict: mm.predict, ymin: mm.ymin, ymax: mm.ymax };
+  const land = document.getElementById("landEffect").value;
+  if (model === "powell" || land === "kd")
+    return { available: false, why: "Single-point mode runs live simulation — switch to " +
+      "Holland or Willoughby, with Land model None or Surface roughness." };
+  if (!profilerState.pt)
+    return { available: false, why: "Pick a point: click “Pick on map”, then a grid vertex." };
+  const keys = mm.stats.map(s => s.v);
+  const predict = raw => { const rec = {}; keys.forEach((k, i) => rec[k] = raw[i]);
+                           return pointResponse(model, rec, profilerState.pt); };
+  const means = mm.stats.map(s => s.m); let lo = Infinity, hi = -Infinity;
+  mm.stats.forEach((s, i) => { for (let k = 0; k <= 12; k++) {
+    const raw = means.slice(); raw[i] = s.min + (k / 12) * (s.max - s.min);
+    const y = predict(raw); if (y < lo) lo = y; if (y > hi) hi = y; } });
+  const pad = (hi - lo) * 0.06 || 1;
+  return { available: true, predict, ymin: lo - pad, ymax: hi + pad, direct: true };
+}
+
+// set the single-point vertex from a map click, drop a crosshair marker, re-render
+function profilerPickPoint(idx) {
+  const q = state.grid.points[idx];
+  profilerState.pt = { ew: q.ew, ns: q.ns, idx };
+  profilerState.picking = false;
+  document.getElementById("map").style.cursor = "";
+  if (profilerState.marker) state.map.removeLayer(profilerState.marker);
+  profilerState.marker = L.marker([q.lat, q.lon], { icon: L.divIcon({
+    className: "prof-pin", html: "✕", iconSize: [22, 22], iconAnchor: [11, 11] }) }).addTo(state.map);
+  buildProfilerDOM();
+}
+
 function buildProfilerDOM() {
   const p = panels["prof"], mm = profilerState.mm;
   const model = document.getElementById("model").value;
   const catN = document.getElementById("category").value;
-  const metricTxt = responseVar() === "tlc" ? "%TLC" : "mean peak wind (mph)";
-  const cvTxt = mm.cv != null ? ` cv=${mm.cv.toFixed(2)}` : "";
-  const head = `${METAMODEL_LABEL[mm.type]} · ${model} · Cat ${catN} · Y = ${metricTxt} · ` +
-               `R²=${mm.r2.toFixed(2)}${cvTxt} · Y range [${mm.ymin.toFixed(2)}, ${mm.ymax.toFixed(2)}]${mm.note}`;
-  const view = profilerState.view;
-  const toggle =
+  const metricTxt = responseVar() === "tlc"
+    ? (profilerState.scale === "point" ? "%LC at point" : "%TLC")
+    : "peak wind (mph)";
+  const view = profilerState.view, scale = profilerState.scale;
+  profilerState.pred = profilerPredictor();
+  const pred = profilerState.pred;
+
+  const ptTxt = profilerState.pt ? `(${profilerState.pt.ew},${profilerState.pt.ns})` : "none";
+  const toggles =
     `<div class="prof-toggle">` +
     `<button class="prof-tab${view === "profiler" ? " active" : ""}" data-view="profiler">Profiler</button>` +
     `<button class="prof-tab${view === "matrix" ? " active" : ""}" data-view="matrix">Interaction matrix</button>` +
+    `</div>` +
+    `<div class="prof-toggle">` +
+    `<button class="prof-tab${scale === "footprint" ? " active" : ""}" data-scale="footprint">Footprint mean</button>` +
+    `<button class="prof-tab${scale === "point" ? " active" : ""}" data-scale="point">Single point</button>` +
+    (scale === "point"
+      ? `<button class="prof-pick${profilerState.picking ? " active" : ""}" id="profPick">Pick on map</button>` +
+        `<span class="prof-ptlbl">${ptTxt}</span>` : "") +
     `</div>`;
 
+  const srcTxt = scale === "point" ? "direct simulation (no metamodel)" : METAMODEL_LABEL[mm.type];
+  const rng = pred.available ? ` · Y range [${pred.ymin.toFixed(2)}, ${pred.ymax.toFixed(2)}]` : "";
+  const fit = scale === "point" ? "" : ` · R²=${mm.r2.toFixed(2)}${mm.note}`;
+  const head = `${srcTxt} · ${model} · Cat ${catN} · Y = ${metricTxt}${fit}${rng}`;
+
+  if (!pred.available) {                              // point mode w/ Powell/KD or no point
+    p.body.innerHTML = toggles + `<p class='note'>${pred.why}</p>`;
+    wireProfTabs(p);
+    return;
+  }
+
   if (view === "matrix") {
-    p.body.innerHTML = toggle +
+    p.body.innerHTML = toggles +
       `<div class="prof-axis">Cell (row <b>r</b>, col <b>c</b>): effect of <b>c</b> on ${metricTxt} ` +
-      `with <b>r</b> held at <span style="color:#ef4444">min (red)</span> / ` +
-      `<span style="color:#3b82f6">max (blue)</span>, other inputs at their mean. ` +
-      `Parallel red/blue = no interaction; diverging = interaction.</div>` +
+      `with <b>r</b> at <span style="color:#ef4444">min (red)</span> / ` +
+      `<span style="color:#3b82f6">max (blue)</span>, others at mean. ` +
+      (scale === "point" ? `Single point ${ptTxt}, direct simulation. ` : "") +
+      `Parallel = no interaction; diverging = interaction.</div>` +
       `<div class="prof-matrix" style="grid-template-columns:repeat(${mm.stats.length},1fr)"></div>` +
       `<p class="note">${head}</p>`;
     wireProfTabs(p);
@@ -503,9 +579,10 @@ function buildProfilerDOM() {
       `step="${((s.max - s.min) / 100) || 0.01}" value="${ref[i]}"/>` +
       `<b data-v="${i}">${ref[i].toFixed(2)}</b></label>`;
   });
-  p.body.innerHTML = toggle +
+  p.body.innerHTML = toggles +
     `<div class="prof-axis">Each panel — <b>y</b>: ${metricTxt} &nbsp;·&nbsp; ` +
-    `<b>x</b>: the named input over its range (dashed line = reference value)</div>` +
+    `<b>x</b>: the named input over its range (dashed line = reference value)` +
+    (scale === "point" ? ` &nbsp;·&nbsp; single point ${ptTxt}` : "") + `</div>` +
     `<div class="prof-grid"></div>` +
     `<div class="prof-sliders">${sliders}</div>` +
     `<p class="note">${head}` +
@@ -524,8 +601,24 @@ function buildProfilerDOM() {
 }
 
 function wireProfTabs(p) {
-  p.body.querySelectorAll(".prof-tab").forEach(b =>
+  p.body.querySelectorAll(".prof-tab[data-view]").forEach(b =>
     b.addEventListener("click", () => { profilerState.view = b.dataset.view; buildProfilerDOM(); }));
+  p.body.querySelectorAll(".prof-tab[data-scale]").forEach(b =>
+    b.addEventListener("click", () => {
+      profilerState.scale = b.dataset.scale;
+      profilerState.picking = false;
+      document.getElementById("map").style.cursor = "";
+      if (profilerState.scale !== "point" && profilerState.marker) {
+        state.map.removeLayer(profilerState.marker); profilerState.marker = null;
+      }
+      buildProfilerDOM();
+    }));
+  const pick = p.body.querySelector("#profPick");
+  if (pick) pick.addEventListener("click", () => {
+    profilerState.picking = !profilerState.picking;
+    document.getElementById("map").style.cursor = profilerState.picking ? "crosshair" : "";
+    pick.classList.toggle("active", profilerState.picking);
+  });
 }
 
 // N×N interaction matrix: cell (r,c) = effect of input c on the response with input
@@ -536,7 +629,8 @@ function drawInteractionMatrix() {
   const grid = p && p.body.querySelector(".prof-matrix");
   if (!grid) return;
   const stats = mm.stats, N = stats.length, means = stats.map(s => s.m);
-  const ylo = mm.ymin, yhi = mm.ymax, yspan = (yhi - ylo) || 1;
+  const pred = profilerState.pred, predict = pred.predict;
+  const ylo = pred.ymin, yhi = pred.ymax, yspan = (yhi - ylo) || 1;
   const clampY = y => Math.max(ylo, Math.min(yhi, y));
   const NS = 24, W = 120, H = 80, mL = 20, mR = 6, mT = 7, mB = 14;
   const ypix = y => mT + (1 - (y - ylo) / yspan) * (H - mT - mB);
@@ -557,7 +651,7 @@ function drawInteractionMatrix() {
         for (let k = 0; k <= NS; k++) {
           const xv = xlo + (k / NS) * xspan;
           const raw = means.slice(); raw[c] = xv; raw[r] = level;
-          pts += `${xpix(xv).toFixed(1)},${ypix(clampY(mm.predict(raw))).toFixed(1)} `;
+          pts += `${xpix(xv).toFixed(1)},${ypix(clampY(predict(raw))).toFixed(1)} `;
         }
         return pts.trim();
       };
@@ -578,8 +672,9 @@ function updateProfilerPlots() {
   if (!p || !mm) return;
   const grid = p.body.querySelector(".prof-grid");
   if (!grid) return;
+  const pred = profilerState.pred, predict = pred.predict;
   const NS = 40, W = 150, H = 96, mL = 26, mR = 6, mT = 8, mB = 16;
-  const ylo = mm.ymin, yhi = mm.ymax, yspan = (yhi - ylo) || 1;
+  const ylo = pred.ymin, yhi = pred.ymax, yspan = (yhi - ylo) || 1;
   const clampY = y => Math.max(ylo, Math.min(yhi, y));
   let html = "";
   mm.stats.forEach((s, i) => {
@@ -590,9 +685,9 @@ function updateProfilerPlots() {
     for (let k = 0; k <= NS; k++) {
       const xv = xlo + (k / NS) * xspan;
       const raw = ref.slice(); raw[i] = xv;
-      pts += `${xpix(xv).toFixed(1)},${ypix(clampY(mm.predict(raw))).toFixed(1)} `;
+      pts += `${xpix(xv).toFixed(1)},${ypix(clampY(predict(raw))).toFixed(1)} `;
     }
-    const refY = clampY(mm.predict(ref));
+    const refY = clampY(predict(ref));
     let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%">`;
     svg += `<line x1="${mL}" y1="${ypix(ylo)}" x2="${W - mR}" y2="${ypix(ylo)}" stroke="#cbd5e1"/>`;
     svg += `<line x1="${mL}" y1="${mT}" x2="${mL}" y2="${H - mB}" stroke="#cbd5e1"/>`;

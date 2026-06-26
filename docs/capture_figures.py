@@ -42,6 +42,14 @@ FIGURES = [
     ("analysis_matrix", {"model": "powell", "category": "5", "_btn": "btnProf",
                         "_js": "[...document.querySelectorAll('.prof-tab')]"
                                ".find(b=>b.dataset.view==='matrix').click();"}, ".analysis-panel"),
+    ("analysis_matrix_point", {"model": "powell", "category": "5", "_btn": "btnProf",
+                        "_js": "document.getElementById('model').value='holland';"
+                               "document.getElementById('model').dispatchEvent(new Event('change'));"
+                               "document.getElementById('response').value='tlc';"
+                               "document.getElementById('response').dispatchEvent(new Event('change'));"
+                               "profilerState.scale='point';profilerState.view='matrix';"
+                               "profilerPickPoint(state.grid.points.findIndex(p=>p.ew===6&&p.ns===33));"},
+                        ".analysis-panel"),
     ("analysis_tlc_cdf",  {"model": "powell", "category": "5", "response": "tlc",
                           "_btn": "btnCDF"}, ".analysis-panel"),
     ("analysis_compare",  {"model": "powell", "category": "5", "_btn": "btnCompare"}, ".analysis-panel"),
@@ -111,7 +119,8 @@ def main():
             if sel:
                 # enlarge the floating window so chart + legend + note all show
                 # (the financial panel has controls + plot + table -> taller)
-                h = "700px" if name in ("analysis_financial", "analysis_matrix") else "560px"
+                h = "700px" if name in ("analysis_financial", "analysis_matrix",
+                                         "analysis_matrix_point") else "560px"
                 drv.execute_script(
                     "const p=document.querySelector('.analysis-panel');"
                     f"if(p){{p.style.width='540px';p.style.height='{h}';}}")
