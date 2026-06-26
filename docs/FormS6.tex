@@ -299,6 +299,31 @@ interaction between that pair of variables.}
 \label{fig:profiler}
 \end{figure}
 
+\paragraph{Interaction matrix.}
+A \textbf{Profiler\,$\,\leftrightarrow\,$Interaction matrix} toggle at the top of the
+panel offers a second, all-at-once view of the same metamodel
+(Figure~\ref{fig:matrix}). It is an $N\!\times\!N$ grid over the six inputs: the
+diagonal labels each variable with its min$\,\to\,$max range, and each off-diagonal
+cell $(r,c)$ draws the effect of input $c$ on $\hat Y$ with input $r$ held at its
+\textcolor{red}{minimum (red)} and \textcolor{blue}{maximum (blue)}, all other
+inputs at their mean. Parallel red and blue curves mean no interaction; diverging
+slopes or a widening gap mean $r$ and $c$ interact. Where the slider profiler is the
+interactive explorer (one reference point at a time), the matrix is a standing map
+of \emph{every} pairwise interaction at once---e.g.\ the $R_{\max}$ row shows a
+large red/blue separation against WSP and CF, the same interaction structure the
+sliders reveal one pair at a time. Both views are driven by the same fit; switching
+the \textbf{Metamodel} (Linear/GPR/NN) or response redraws either.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\textwidth]{analysis_matrix.png}
+\caption{Interaction-matrix view (Category~5 Powell, $Y=$ mean peak wind). Diagonal:
+each input and its min$\to$max range. Off-diagonal cell $(r,c)$: the effect of input
+$c$ with input $r$ at min (red) vs max (blue), others at their mean; diverging
+red/blue indicates an $r\times c$ interaction.}
+\label{fig:matrix}
+\end{figure}
+
 \paragraph{Loss-cost distribution.}
 A companion panel plots the empirical CDF of $\%\text{TLC}(i)$ over the $100$
 vectors for the selected category (the ROA's Fig.~5 analogue), summarizing the

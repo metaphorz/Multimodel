@@ -583,5 +583,21 @@ unaffected (the client only ever sees a 682-number array, a few KB).
 4. **Renter/commercial.** `B25082` is owner-occupied only. v1 ships that as a
    labeled proxy; renter/commercial scaling is a later refinement.
 
+## Interaction matrix view (2026-06-26) — DONE
+Second, all-at-once view of pairwise interactions, as a **Profiler ↔ Interaction
+matrix** toggle inside the existing Interaction Profiler panel (per user: toggle,
+not a separate menu item; low/high = min/max). Replicates an emailed JMP-style
+matrix.
+- `web/analysis.js`: `profilerState.view`; `buildProfilerDOM` branches on view +
+  renders the toggle; `wireProfTabs`; `drawInteractionMatrix` — N×N grid, diagonal
+  = variable + min→max range, off-diagonal (r,c) = effect of c with r at min (red)
+  / max (blue), others at mean. Reuses `mm.predict` — no refit.
+- `web/style.css`: `.prof-toggle/.prof-tab/.prof-matrix/.prof-diag`.
+- Tests: `test_profiler_cdf.py` fixed for the Statistics/Actuarial groups (open
+  group before clicking btnProf/btnCDF) + a matrix-toggle check (36 cells, 6
+  diagonal, 60 polylines). Passes.
+- Docs: Interaction-matrix paragraph + figure `analysis_matrix.png`
+  (capture `_js` toggles to the matrix tab; +1s settle before `_js`); PDF rebuilt.
+
 ## Review
 _(to be filled in as work proceeds)_

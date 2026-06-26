@@ -39,6 +39,9 @@ FIGURES = [
     ("analysis_src",     {"model": "powell", "_btn": "btnSRC"}, ".analysis-panel"),
     ("analysis_epr",     {"model": "powell", "_btn": "btnEPR"}, ".analysis-panel"),
     ("analysis_profiler", {"model": "powell", "category": "5", "_btn": "btnProf"}, ".analysis-panel"),
+    ("analysis_matrix", {"model": "powell", "category": "5", "_btn": "btnProf",
+                        "_js": "[...document.querySelectorAll('.prof-tab')]"
+                               ".find(b=>b.dataset.view==='matrix').click();"}, ".analysis-panel"),
     ("analysis_tlc_cdf",  {"model": "powell", "category": "5", "response": "tlc",
                           "_btn": "btnCDF"}, ".analysis-panel"),
     ("analysis_compare",  {"model": "powell", "category": "5", "_btn": "btnCompare"}, ".analysis-panel"),
@@ -75,6 +78,7 @@ def apply(driver, controls):
             "const i=state.grid.points.findIndex(p=>p.land&&p.ns===arguments[1]&&p.ew===arguments[0]);"
             "if(i>=0) openWindfieldPopup(i);", ew, ns)
     if "_js" in controls:
+        time.sleep(1.0)   # let any panel opened by _btn finish rendering first
         driver.execute_script(controls["_js"])
 
 
@@ -107,7 +111,7 @@ def main():
             if sel:
                 # enlarge the floating window so chart + legend + note all show
                 # (the financial panel has controls + plot + table -> taller)
-                h = "700px" if name == "analysis_financial" else "560px"
+                h = "700px" if name in ("analysis_financial", "analysis_matrix") else "560px"
                 drv.execute_script(
                     "const p=document.querySelector('.analysis-panel');"
                     f"if(p){{p.style.width='540px';p.style.height='{h}';}}")

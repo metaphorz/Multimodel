@@ -10,7 +10,7 @@ Verifies:
 
 Run:  python tests/auto/test_profiler_cdf.py   (server must be up via ./start)
 """
-import os, sys, logging
+import os, sys, time, logging
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -50,7 +50,16 @@ def main():
         wait.until(lambda d: "Loading grid" not in d.find_element(By.ID, "info").text)
         info("App initialized: " + driver.find_element(By.ID, "info").text)
 
-        # 1. open Interaction Profiler
+        # analysis buttons live in collapsible Statistics / Actuarial groups
+        def open_group(grp):
+            driver.execute_script(
+                "const g=[...document.querySelectorAll('.analysis-group')]"
+                ".find(g=>g.dataset.grp===arguments[0]);"
+                "if(g && !g.classList.contains('open')) g.click();", grp)
+            time.sleep(0.3)
+
+        # 1. open Interaction Profiler (Statistics group)
+        open_group("grpStats")
         driver.find_element(By.ID, "btnProf").click()
         wait.until(lambda d: len(d.find_elements(By.CSS_SELECTOR, ".prof-cell")) == 6)
         cells = driver.find_elements(By.CSS_SELECTOR, ".prof-cell")
@@ -74,6 +83,22 @@ def main():
         if changed == 0:
             failures.append("no curve changed when moving CP -> interactions not shown")
 
+        # 2b. Interaction-matrix toggle: 6x6 cells, 6 diagonal, red+blue per off-diagonal
+        driver.execute_script("[...document.querySelectorAll('.prof-tab')]"
+                              ".find(b=>b.dataset.view==='matrix').click();")
+        wait.until(lambda d: len(d.find_elements(By.CSS_SELECTOR, ".prof-matrix .prof-cell")) == 36)
+        n_diag = len(driver.find_elements(By.CSS_SELECTOR, ".prof-matrix .prof-diag"))
+        n_poly = len(driver.find_elements(By.CSS_SELECTOR, ".prof-matrix svg polyline"))
+        info(f"Matrix: 36 cells, {n_diag} diagonal, {n_poly} polylines")
+        if n_diag != 6:
+            failures.append(f"matrix expected 6 diagonal cells, got {n_diag}")
+        if n_poly != 60:
+            failures.append(f"matrix expected 60 polylines (30x red+blue), got {n_poly}")
+        # back to the slider profiler
+        driver.execute_script("[...document.querySelectorAll('.prof-tab')]"
+                              ".find(b=>b.dataset.view==='profiler').click();")
+        wait.until(lambda d: len(d.find_elements(By.CSS_SELECTOR, ".prof-sliders input")) == 6)
+
         # 3. switch Response -> %TLC, profiler re-renders with Y=%TLC
         Select(driver.find_element(By.ID, "response")).select_by_value("tlc")
         wait.until(lambda d: "%TLC" in
@@ -85,7 +110,8 @@ def main():
         if "%TLC" not in note:
             failures.append(f"profiler did not switch to %TLC: {note!r}")
 
-        # 4. CDF panel renders
+        # 4. CDF panel renders (Actuarial group)
+        open_group("grpAct")
         driver.find_element(By.ID, "btnCDF").click()
         wait.until(lambda d: any(
             "input vectors" in p.text

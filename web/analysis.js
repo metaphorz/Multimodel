@@ -18,7 +18,7 @@ const VAR_COLORS = {
   WSP: "#111827", CF: "#ef4444", FFP: "#7c3aed",
 };
 const analysisState = { mode: null, cache: null };  // mode: 'src' | 'epr'
-const profilerState = { mm: null, ref: null };       // metamodel + reference point
+const profilerState = { mm: null, ref: null, view: "profiler" };  // +view: profiler|matrix
 
 // ---- linear algebra ------------------------------------------------------
 function mean(a) { return a.reduce((s, v) => s + v, 0) / a.length; }
@@ -467,10 +467,35 @@ function drawProfiler() {
 }
 
 function buildProfilerDOM() {
-  const p = panels["prof"], mm = profilerState.mm, ref = profilerState.ref;
+  const p = panels["prof"], mm = profilerState.mm;
   const model = document.getElementById("model").value;
   const catN = document.getElementById("category").value;
   const metricTxt = responseVar() === "tlc" ? "%TLC" : "mean peak wind (mph)";
+  const cvTxt = mm.cv != null ? ` cv=${mm.cv.toFixed(2)}` : "";
+  const head = `${METAMODEL_LABEL[mm.type]} · ${model} · Cat ${catN} · Y = ${metricTxt} · ` +
+               `R²=${mm.r2.toFixed(2)}${cvTxt} · Y range [${mm.ymin.toFixed(2)}, ${mm.ymax.toFixed(2)}]${mm.note}`;
+  const view = profilerState.view;
+  const toggle =
+    `<div class="prof-toggle">` +
+    `<button class="prof-tab${view === "profiler" ? " active" : ""}" data-view="profiler">Profiler</button>` +
+    `<button class="prof-tab${view === "matrix" ? " active" : ""}" data-view="matrix">Interaction matrix</button>` +
+    `</div>`;
+
+  if (view === "matrix") {
+    p.body.innerHTML = toggle +
+      `<div class="prof-axis">Cell (row <b>r</b>, col <b>c</b>): effect of <b>c</b> on ${metricTxt} ` +
+      `with <b>r</b> held at <span style="color:#ef4444">min (red)</span> / ` +
+      `<span style="color:#3b82f6">max (blue)</span>, other inputs at their mean. ` +
+      `Parallel red/blue = no interaction; diverging = interaction.</div>` +
+      `<div class="prof-matrix" style="grid-template-columns:repeat(${mm.stats.length},1fr)"></div>` +
+      `<p class="note">${head}</p>`;
+    wireProfTabs(p);
+    drawInteractionMatrix();
+    return;
+  }
+
+  // ---- profiler view (partial-dependence + sliders) ----
+  const ref = profilerState.ref;
   let sliders = "";
   mm.stats.forEach((s, i) => {
     sliders += `<label class="prof-sl"><span style="color:${VAR_COLORS[s.v]}">${s.v}</span>` +
@@ -478,15 +503,14 @@ function buildProfilerDOM() {
       `step="${((s.max - s.min) / 100) || 0.01}" value="${ref[i]}"/>` +
       `<b data-v="${i}">${ref[i].toFixed(2)}</b></label>`;
   });
-  const cvTxt = mm.cv != null ? ` cv=${mm.cv.toFixed(2)}` : "";
-  p.body.innerHTML =
+  p.body.innerHTML = toggle +
     `<div class="prof-axis">Each panel — <b>y</b>: ${metricTxt} &nbsp;·&nbsp; ` +
     `<b>x</b>: the named input over its range (dashed line = reference value)</div>` +
     `<div class="prof-grid"></div>` +
     `<div class="prof-sliders">${sliders}</div>` +
-    `<p class="note">${METAMODEL_LABEL[mm.type]} · ${model} · Cat ${catN} · Y = ${metricTxt} · ` +
-    `R²=${mm.r2.toFixed(2)}${cvTxt} · Y range [${mm.ymin.toFixed(2)}, ${mm.ymax.toFixed(2)}]${mm.note}` +
+    `<p class="note">${head}` +
     `<br>Move a slider: another variable's curve changing slope = its interaction with the moved variable.</p>`;
+  wireProfTabs(p);
   p.body.querySelectorAll(".prof-sliders input").forEach(inp => {
     inp.addEventListener("input", () => {
       const idx = +inp.dataset.i;
@@ -497,6 +521,56 @@ function buildProfilerDOM() {
     });
   });
   updateProfilerPlots();
+}
+
+function wireProfTabs(p) {
+  p.body.querySelectorAll(".prof-tab").forEach(b =>
+    b.addEventListener("click", () => { profilerState.view = b.dataset.view; buildProfilerDOM(); }));
+}
+
+// N×N interaction matrix: cell (r,c) = effect of input c on the response with input
+// r fixed at min (red) and max (blue), all other inputs at their mean. Diagonal = the
+// variable name + its min→max range (the red/blue levels). Reuses mm.predict — no refit.
+function drawInteractionMatrix() {
+  const p = panels["prof"], mm = profilerState.mm;
+  const grid = p && p.body.querySelector(".prof-matrix");
+  if (!grid) return;
+  const stats = mm.stats, N = stats.length, means = stats.map(s => s.m);
+  const ylo = mm.ymin, yhi = mm.ymax, yspan = (yhi - ylo) || 1;
+  const clampY = y => Math.max(ylo, Math.min(yhi, y));
+  const NS = 24, W = 120, H = 80, mL = 20, mR = 6, mT = 7, mB = 14;
+  const ypix = y => mT + (1 - (y - ylo) / yspan) * (H - mT - mB);
+  const fmt = v => Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2);
+  let html = "";
+  for (let r = 0; r < N; r++) {
+    for (let c = 0; c < N; c++) {
+      if (r === c) {
+        html += `<div class="prof-cell prof-diag"><div style="color:${VAR_COLORS[stats[r].v]}">${stats[r].v}</div>` +
+          `<div class="prof-diag-rng"><span style="color:#ef4444">${fmt(stats[r].min)}</span> → ` +
+          `<span style="color:#3b82f6">${fmt(stats[r].max)}</span></div></div>`;
+        continue;
+      }
+      const sc = stats[c], xlo = sc.min, xhi = sc.max, xspan = (xhi - xlo) || 1;
+      const xpix = x => mL + ((x - xlo) / xspan) * (W - mL - mR);
+      const curve = level => {
+        let pts = "";
+        for (let k = 0; k <= NS; k++) {
+          const xv = xlo + (k / NS) * xspan;
+          const raw = means.slice(); raw[c] = xv; raw[r] = level;
+          pts += `${xpix(xv).toFixed(1)},${ypix(clampY(mm.predict(raw))).toFixed(1)} `;
+        }
+        return pts.trim();
+      };
+      let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%"><title>${sc.v} vs ${stats[r].v}</title>`;
+      svg += `<line x1="${mL}" y1="${ypix(ylo)}" x2="${W - mR}" y2="${ypix(ylo)}" stroke="#e2e8f0"/>`;
+      svg += `<line x1="${mL}" y1="${mT}" x2="${mL}" y2="${H - mB}" stroke="#e2e8f0"/>`;
+      svg += `<polyline points="${curve(stats[r].min)}" fill="none" stroke="#ef4444" stroke-width="1.6"/>`;
+      svg += `<polyline points="${curve(stats[r].max)}" fill="none" stroke="#3b82f6" stroke-width="1.6"/>`;
+      svg += `<text x="${(mL + W - mR) / 2}" y="${H - 3}" text-anchor="middle" class="ax">${sc.v}</text></svg>`;
+      html += `<div class="prof-cell">${svg}</div>`;
+    }
+  }
+  grid.innerHTML = html;
 }
 
 function updateProfilerPlots() {

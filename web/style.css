@@ -90,9 +90,17 @@ body.theme-light .analysis-group:hover { background: #d4dce5; }
 .legend2 .lgi span { width: 12px; height: 12px; border-radius: 2px; margin-right: 4px; }
 
 /* interaction profiler panel */
+.prof-toggle { display: flex; gap: 6px; margin-bottom: 8px; }
+.prof-tab { flex: 1; padding: 5px; cursor: pointer; font-size: 12px;
+  background: #e2e8f0; color: #1c2530; border: none; border-radius: 5px; }
+.prof-tab.active { background: #2563eb; color: #fff; }
 .prof-axis { font-size: 11px; color: #475569; margin: 2px 0 6px; }
 .prof-axis b { color: #1c2530; }
 .prof-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.prof-matrix { display: grid; gap: 2px; }
+.prof-diag { display: flex; flex-direction: column; align-items: center;
+  justify-content: center; font-weight: 600; font-size: 12px; text-align: center; }
+.prof-diag-rng { font-size: 9px; font-weight: 400; margin-top: 2px; }
 .prof-cell { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; }
 .prof-sliders { display: grid; grid-template-columns: repeat(2, 1fr);
   gap: 2px 12px; margin-top: 8px; }
