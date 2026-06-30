@@ -10,7 +10,10 @@ const PHYS = {
   OMEGA: 7.2921159e-5,
   LAT0: 25.8611,          // constant-latitude due-west track
   BEARING: 270.0,         // due west
-  T_MAX: 12.0, T_DT: 0.1, // fine time sampling for the 12-hr peak envelope
+  // t=0 is the storm at ew=0 (east edge); t<0 is the off-grid Atlantic approach
+  // (coastal front side), +24h lets even the slowest storm fully clear the grid's
+  // west edge. 1-min sampling avoids aliasing of the peak.
+  T_MIN: -12.0, T_MAX: 24.0, T_DT: 1.0 / 60.0,
   BETA10: 1.0,            // gradient level; CF does surface conversion
 };
 
@@ -40,11 +43,11 @@ function trackIsLand(ewc, pts) {
 
 // per-time intensity ratio s(t)=V(t)/V0 (decay over land, recover over Gulf)
 function intensitySchedule(V0, vt, pts) {
-  const nT = Math.round(PHYS.T_MAX / PHYS.T_DT);
+  const nT = Math.round((PHYS.T_MAX - PHYS.T_MIN) / PHYS.T_DT);
   const s = new Float64Array(nT + 1);
   let V = V0, made = false;
   for (let i = 0; i <= nT; i++) {
-    const land = trackIsLand(vt * i * PHYS.T_DT, pts);
+    const land = trackIsLand(vt * (PHYS.T_MIN + i * PHYS.T_DT), pts);
     if (land) {
       if (!made) { V *= KD.R; made = true; }          // one-time coastal drop
       V = KD.VB + (V - KD.VB) * Math.exp(-KD.ALPHA * PHYS.T_DT);
@@ -96,7 +99,7 @@ function cfEffective(rMiles, RmaxMiles, cfBase) {
   return Math.max(cf, 0);
 }
 
-/* Compute per-vertex peak (12-hr max) surface wind (mph) for one input vector.
+/* Compute per-vertex peak (max over the t=T_MIN..T_MAX passage) surface wind (mph) for one input vector.
    model: "holland" | "willoughby"
    rec:   { CP, Rmax(mi), VT(mph), CF, FFP, ... }
    B:     Holland shape parameter (from WSP quantile)
@@ -131,12 +134,12 @@ function fieldFnFor(model, rec, B) {
 function computeLiveWind(model, rec, B, pts, sched) {
   const fn = fieldFnFor(model, rec, B);
   const out = new Float32Array(pts.length);
-  const nT = Math.round(PHYS.T_MAX / PHYS.T_DT);
+  const nT = Math.round((PHYS.T_MAX - PHYS.T_MIN) / PHYS.T_DT);
   for (let i = 0; i < pts.length; i++) {
     const ew = pts[i].ew, ns = pts[i].ns;
     let peak = 0;
     for (let s = 0; s <= nT; s++) {
-      const ewc = rec.VT * s * PHYS.T_DT;
+      const ewc = rec.VT * (PHYS.T_MIN + s * PHYS.T_DT);
       let surf = fn(-(ew - ewc) * PHYS.MILE_M, ns * PHYS.MILE_M);
       if (sched) surf *= sched[s];          // K&D intensity ratio at this time
       if (surf > peak) peak = surf;
@@ -162,15 +165,15 @@ function stormRelativeField(model, rec, B, halfKm = 90, n = 81) {
   return { Z, n, halfKm };
 }
 
-// wind at one grid vertex over the 12-hr passage, with its storm-relative
+// wind at one grid vertex over the full passage (t=T_MIN..T_MAX), with its storm-relative
 // position each step. opts: { sched (K&D s(t)), factor (roughness multiplier) }.
 function pointTimeSeries(model, rec, B, ew, ns, opts = {}) {
   const fn = fieldFnFor(model, rec, B);
-  const nT = Math.round(PHYS.T_MAX / PHYS.T_DT);
+  const nT = Math.round((PHYS.T_MAX - PHYS.T_MIN) / PHYS.T_DT);
   const t = [], w = [], rx = [], ry = [];
   let imax = 0;
   for (let s = 0; s <= nT; s++) {
-    const tt = s * PHYS.T_DT, ewc = rec.VT * tt;
+    const tt = PHYS.T_MIN + s * PHYS.T_DT, ewc = rec.VT * tt;
     const xE_m = -(ew - ewc) * PHYS.MILE_M, yN_m = ns * PHYS.MILE_M;
     let surf = fn(xE_m, yN_m);
     if (opts.sched) surf *= opts.sched[s];

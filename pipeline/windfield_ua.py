@@ -55,7 +55,7 @@ def main():
     land_idx = [i for i, p in enumerate(pts) if p["land"]]
     ew = torch.tensor([p["ew"] for p in pts], dtype=torch.float32, device=device)
     ns = torch.tensor([p["ns"] for p in pts], dtype=torch.float32, device=device)
-    hours_t = torch.arange(0.0, W.T_MAX + W.T_DT / 2, W.T_DT, dtype=torch.float32, device=device)
+    hours_t = torch.arange(W.T_MIN, W.T_MAX + W.T_DT / 2, W.T_DT, dtype=torch.float32, device=device)
     land_t = torch.tensor(land_idx, dtype=torch.long, device=device)
 
     wb = load_workbook(XLSX, read_only=True, data_only=True)

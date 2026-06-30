@@ -55,6 +55,17 @@ Z0_BY_CLASS = {
     95: 0.15,   # emergent herbaceous wetland (sawgrass marsh)
 }
 
+# NLCD class -> human-readable label (for inspecting roughness at a grid point)
+NLCD_NAME = {
+    0: "Open ocean / no data", 11: "Open water", 12: "Perennial ice/snow",
+    21: "Developed, open space", 22: "Developed, low (suburban)",
+    23: "Developed, medium", 24: "Developed, high (urban core)", 31: "Barren",
+    41: "Deciduous forest", 42: "Evergreen forest", 43: "Mixed forest",
+    51: "Dwarf scrub", 52: "Shrub/scrub", 71: "Grassland", 72: "Sedge",
+    73: "Lichens", 74: "Moss", 81: "Pasture/hay", 82: "Cultivated crops",
+    90: "Woody wetland", 95: "Emergent herbaceous wetland (marsh)",
+}
+
 # log-law terrain-conversion parameters
 Z0_MARINE = 2e-4
 Z_REF = 10.0
@@ -76,22 +87,36 @@ def main():
     band = ds.read(1)
     H, W = band.shape
 
-    factors, classes = [], []
+    # per-pixel z0 lookup indexed by NLCD code (fast vectorised window mapping)
+    MAXCODE = max(Z0_BY_CLASS) + 1
+    Z0_LUT = np.full(MAXCODE, 0.05)
+    for k, v in Z0_BY_CLASS.items():
+        Z0_LUT[k] = v
+
+    factors, center_class, z0_mm = [], [], []
     for p in grid["points"]:
         r, c = rowcol(ds.transform, p["lon"], p["lat"])
+        rc, cc = min(max(r, 0), H - 1), min(max(c, 0), W - 1)
+        center_class.append(int(band[rc, cc]))                    # exact land cover AT the vertex
         r0, r1 = max(0, r - WIN_PX), min(H, r + WIN_PX + 1)
         c0, c1 = max(0, c - WIN_PX), min(W, c + WIN_PX + 1)
-        win = band[r0:r1, c0:c1].ravel()
-        cls = int(np.bincount(win).argmax()) if win.size else 0   # modal class
-        z0 = Z0_BY_CLASS.get(cls, 0.05)
-        classes.append(cls)
+        win = np.clip(band[r0:r1, c0:c1].ravel(), 0, MAXCODE - 1)
+        # fetch-blended effective z0: area-weighted GEOMETRIC mean (log-average) of
+        # the per-pixel z0 over the ~500 m window. This is the standard way to
+        # combine heterogeneous roughness over an upwind fetch and avoids the old
+        # modal "winner-take-all" flipping coastal developed points to open water.
+        z0 = float(np.exp(np.mean(np.log(Z0_LUT[win])))) if win.size else Z0_MARINE
+        z0_mm.append(round(z0 * 1000.0, 1))                       # blended z0 in millimetres
         factors.append(round(factor_from_z0(z0), 4))
 
     out = {
-        "factors": factors,
-        "note": "NLCD-2021 z0 + gradient-tied log-law (Vickery/ESDU) marine->terrain 10m ratio",
-        "method": {"model": "log-law gradient-tied", "z0_marine": Z0_MARINE,
-                   "z_ref": Z_REF, "z_g": Z_G, "win_px": WIN_PX},
+        "factors": factors,                                       # marine->terrain wind multiplier (from blended z0)
+        "z0_mm": z0_mm,                                           # fetch-blended effective z0 per vertex (mm)
+        "center_class": center_class,                             # NLCD class of the exact pixel at each vertex
+        "class_names": {str(k): v for k, v in NLCD_NAME.items()}, # code -> label lookup
+        "note": "NLCD-2021 fetch-blended z0 (area-wtd geometric mean) + gradient-tied log-law (Vickery/ESDU)",
+        "method": {"model": "log-law gradient-tied", "z0_blend": "area-weighted geometric mean",
+                   "z0_marine": Z0_MARINE, "z_ref": Z_REF, "z_g": Z_G, "win_px": WIN_PX},
         "source": "NLCD 2021 Land Cover (MRLC WCS)",
     }
     json.dump(out, open(OUT, "w"))
@@ -102,8 +127,8 @@ def main():
     print(f"Wrote {OUT}")
     print(f"  factors: {len(factors)}  range [{arr.min():.3f}, {arr.max():.3f}]")
     print(f"  land mean factor: {np.mean(land):.3f}")
-    top = Counter(classes).most_common(8)
-    print(f"  modal classes (class:count): {top}")
+    top = Counter(center_class).most_common(8)
+    print(f"  center-pixel classes (class:count): {top}")
 
 
 if __name__ == "__main__":

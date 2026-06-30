@@ -40,7 +40,12 @@ $N\!=\!-15,-12,\dots,45$ (21 rows). Of the 840 vertices, \textbf{682 are land}
 and 158 water, taken directly from the \texttt{Land-Water ID} worksheet of
 \texttt{FormS6Input.xlsx}. The point $(0,0)$ is the storm centre at $t\!=\!0$,
 nine miles east of the landfall location $(25.8611^\circ$N$,\,80.1196^\circ$W$)$;
-the storm tracks due west, $(0,0)\!\to\!(117,0)$, over 12 hours. Figure~\ref{fig:grid}
+the storm tracks due west at the input forward speed VT. The integration window
+runs from $t\!=\!-12$\,h to $t\!=\!+24$\,h: the 12-hour lead-in places the centre
+well east of the grid over the Atlantic, so coastal vertices experience the full
+\emph{front-side} (approaching) wind maximum and not merely the back side after
+passage; the $+24$\,h tail lets even the slowest storm ($\text{VT}\!\approx\!10$
+mph) fully traverse and clear all 40 grid columns. Figure~\ref{fig:grid}
 shows the rendered grid (land vs.\ water), the track, and the landfall marker.
 
 \begin{figure}[H]
@@ -50,6 +55,41 @@ shows the rendered grid (land vs.\ water), the track, and the landfall marker.
 water (blue) vertices, the due-west storm track (dashed), the $t\!=\!0$ centre,
 and the landfall marker.}
 \label{fig:grid}
+\end{figure}
+
+\subsection{Time step and grid-point loss convergence}
+Each vertex's peak wind is the maximum over the passage as the (frozen)
+storm-relative field advects across it; the boundary-layer PDE is solved
+\emph{once} per storm and only this sampling is repeated per step, so a fine step
+is nearly free. Because the spatial grid is coarse ($\sim$3\,mi), the
+\emph{temporal} sampling carries the resolution of the peak: at hourly steps the
+centre jumps $\text{VT}\times1\,\text{h}\approx13$--$16$\,mi---comparable to or
+larger than Rmax---so the discrete samples can stride past the eyewall and miss
+the true peak. The model uses a \textbf{1-minute step}
+($T_{\Delta}=\tfrac{1}{60}$\,h; 2{,}161 steps over the 36-h window), at which the
+peak is fully resolved.
+
+Figure~\ref{fig:dtconv} quantifies the loss error from coarser steps relative to
+the 1-min reference (HAZUS/ARA vulnerability curve, mean of 10 vectors per
+category). \textbf{Hourly} stepping underestimates total loss by
+$\approx$10\% (Cat~1), 3\% (Cat~3), and 1.5\% (Cat~5), and underestimates the
+\emph{worst individual grid-point} loss by up to $\approx$42\% (Cat~1). The
+effect is largest for the weaker storms, whose winds sit on the steep part of the
+vulnerability curve so wind errors translate directly into loss errors---directly
+relevant to the large point-to-point loss differences in the Cat~1/Cat~3 groups.
+Loss is essentially converged by $\sim$2\,min; the 1-min step leaves no aliasing
+and protects the worst individual vertices. Modelers stepping on synoptic
+(hourly or 6-hourly) best-track cadence over a grid this coarse can therefore
+materially under-report loss.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{dt_convergence.png}
+\caption{Grid-point loss sensitivity to integration step (hourly $\to$ 1-min),
+as \% underestimate vs.\ the 1-min reference: total loss (left) and worst single
+grid-point loss (right), per hurricane category. The dotted line marks hourly
+stepping. The 1-minute step used by the model is fully converged.}
+\label{fig:dtconv}
 \end{figure}
 
 \section{Wind-field models}
@@ -106,13 +146,17 @@ lattice with the wind-speed colour bands.}
 \end{figure}
 
 \section{Land effect: roughness and decay}
-A single \emph{land-effect} selector offers three mutually exclusive treatments
-of the storm's interaction with the land: \textbf{None} (marine winds),
-\textbf{Surface roughness}, and \textbf{Kaplan--DeMaria decay}.
+The storm's interaction with the land is modelled by two \emph{independent},
+combinable toggles: \textbf{Surface roughness} and \textbf{Kaplan--DeMaria
+decay}. They are checkboxes rather than a single exclusive selector, so all four
+states are reachable: neither (pure marine winds), either alone, or both
+together. The default is \textbf{both on}: a spatial terrain-friction effect plus
+a temporal inland-filling effect, which together give the most physically
+realistic field (see below).
 
 \paragraph{Surface roughness.}
 Roughness is applied as a per-vertex, wind-speed-independent multiplier on the
-final surface wind. The roughness length $z_0$ at each vertex is sampled from
+final surface wind. The roughness length $z_0$ at each vertex is derived from
 \textbf{NLCD~2021 land cover} (fetched as a properly georeferenced GeoTIFF from
 the MRLC WCS) via a published land-cover$\to z_0$ table, then converted from
 marine to terrain exposure with the gradient-tied \textbf{log-law}
@@ -122,8 +166,28 @@ marine to terrain exposure with the gradient-tied \textbf{log-law}
 {\ln(z_{\text{ref}}/z_{0,\text{marine}})/\ln(z_g/z_{0,\text{marine}})},
 \]
 with $z_{\text{ref}}=10$\,m and gradient height $z_g=500$\,m; water returns
-$\approx1$. The land-mean factor is $\approx0.67$ (urban $\sim0.50$, wetland
+$\approx1$. The land-mean factor is $\approx0.68$ (urban $\sim0.50$, wetland
 $\sim0.70$). This is a \emph{spatial} terrain-friction effect.
+
+\paragraph{Fetch-blended effective roughness.}
+The effective $z_{0,\text{land}}$ at each vertex is not the single underlying
+pixel but the \textbf{area-weighted geometric mean} (log-average) of the
+per-pixel $z_0$ over a $\sim500$\,m window---the standard way to combine
+heterogeneous roughness over an upwind fetch. This replaces an earlier
+modal ``winner-take-all'' class, which could flip a coastal developed vertex
+entirely to open water whenever the window happened to be water-dominated. The
+blend yields smooth shoreline transitions (e.g.\ a bayfront suburban point
+blends to $z_0\!\approx\!21$\,mm, factor~$\approx\!0.83$, rather than snapping to
+$1.0$).
+
+\paragraph{Per-vertex inspection.}
+Hovering any grid vertex reports its \emph{exact-pixel} NLCD land cover together
+with the fetch-blended $z_0$ (mm) and the resulting multiplier. This exposes
+land/water coding discrepancies: a handful of vertices flagged \emph{land} in the
+Form~S-6 grid fall on NLCD open water (e.g.\ the NW Miami-Dade ``Lake Belt''
+limestone quarry lakes), so they carry exposure/loss on what is physically water.
+Adjacent-vertex roughness differences---which can drive the large point-to-point
+loss spread seen in the Cat~1/Cat~3 groups---are likewise directly inspectable.
 
 \paragraph{Kaplan--DeMaria decay.}
 Roughness alone cannot reproduce a storm weakening as it moves inland, which is
@@ -134,8 +198,12 @@ background $V_b=30.7$\,mph over land, with a gentle recovery
 ($\alpha_{\text{rec}}=0.05\,\text{h}^{-1}$) once the centre re-emerges over the
 Gulf. Landfall ($\approx$E-W~9) and Gulf exit ($\approx$E-W~99) are read from the
 $N$-$S=0$ track land mask. Figure~\ref{fig:kdloss}~(left) shows the resulting
-inland decay for a Category~5 storm. The two options are kept exclusive because
-$\alpha$ already lumps surface friction with loss of the ocean energy source.
+inland decay for a Category~5 storm. Roughness and decay compose multiplicatively
+and are on by default: because the roughness factor is time-independent, the
+combined peak equals (decayed peak)\,$\times$\,(roughness factor). With both
+active the peak wind/loss returns to the coast---e.g.\ at a point $60$\,mi inland
+over the Everglades the Cat~5 mean peak falls from $\approx\!158$\,mph (marine) to
+$\approx\!78$\,mph---rather than persisting at full marine strength far inland.
 
 \section{Sensitivity and uncertainty analysis}\label{sec:sa}
 Following Iman, Johnson, and Schroeder (2001), as the ROA cites:
@@ -343,7 +411,7 @@ $R_{\max}$, smooths the S into a saturating ramp ($517$ of the $682$ land points
 individually S-shaped). Spatial resolution thus changes both the shape of the loss
 response and the apparent strength of its interactions---a concrete cautionary lesson
 for catastrophe-model interpretation. Single-point mode requires a live model
-(Holland/Willoughby) with land effect None or roughness; Powell and Kaplan--DeMaria
+(Holland/Willoughby) with Kaplan--DeMaria decay unticked; Powell or decay-on
 show a short note.
 
 \begin{figure}[H]
@@ -465,8 +533,9 @@ dominant parameter varies spatially across the grid.}
 The viewer offers model / category / input-vector selection (the input vector
 chooses one of the 100 randomized storms for the category), the WSP$\to B$
 distribution control (which feeds the live Holland/Willoughby profiles only and is
-disabled for the precomputed Powell model), the three-way \textbf{Land model}
-selector (None / surface roughness / Kaplan--DeMaria decay), a colour-by control
+disabled for the precomputed Powell model), the \textbf{Land model} checkboxes
+(surface roughness and/or Kaplan--DeMaria decay, both on by default; neither =
+marine), a colour-by control
 (peak wind, loss MDR, land/water, or grid-point dominant-sensitivity), a
 points/filled-contour display toggle,
 light and dark themes (Figure~\ref{fig:light}), and nearest-point hover (peak

@@ -33,13 +33,11 @@
       </select>
     </section>
 
-    <section>
+    <section id="landmodel">
       <h2>Land model</h2>
-      <select id="landEffect">
-        <option value="none">None (marine)</option>
-        <option value="roughness" selected>Surface roughness (terrain)</option>
-        <option value="kd">Kaplan&ndash;DeMaria decay</option>
-      </select>
+      <label><input type="checkbox" id="landRoughness" checked /> Surface roughness (terrain)</label>
+      <label><input type="checkbox" id="landDecay" checked /> Kaplan&ndash;DeMaria decay</label>
+      <p class="bnote">Neither = marine. Tick both for terrain + inland decay.</p>
     </section>
 
     <section>
@@ -74,6 +72,7 @@
         <button id="btnMean" class="vec-btn">Mean</button>
         <button id="btnMax" class="vec-btn">Max</button>
       </div>
+      <div id="vecRow" class="vec-row"></div>
     </section>
 
     <section id="bsection">

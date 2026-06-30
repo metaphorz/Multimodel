@@ -186,37 +186,74 @@ function currentSelection() {
   return { model, cat, vIdx, rec };
 }
 
+// label + unit + decimals for each input-vector parameter (order = display order)
+const VEC_FIELDS = [
+  ["CP", "CP", "mb", 1], ["FFP", "FFP", "mb", 1], ["Rmax", "Rmax", "mi", 1],
+  ["VT", "VT", "mph", 1], ["CF", "CF", "", 3], ["WSP", "WSP", "", 3],
+  ["Quantile", "Quantile", "", 3],
+];
+
+// thin horizontal strip showing the selected vector's parameters. Single-vector
+// mode only — hidden whenever Mean or Max aggregation is active.
+function updateVecRow() {
+  const el = document.getElementById("vecRow");
+  if (!el) return;
+  const { rec } = currentSelection();
+  if (state.meanMode || state.maxMode || !rec) {
+    el.classList.add("hidden");
+    el.innerHTML = "";
+    return;
+  }
+  el.classList.remove("hidden");
+  el.innerHTML = VEC_FIELDS.map(([key, label, unit, dp]) => {
+    const v = rec[key];
+    const val = v == null ? "—" : v.toFixed(dp) + (unit ? " " + unit : "");
+    return `<div class="vc"><span class="k">${label}</span>` +
+           `<span class="v">${val}</span></div>`;
+  }).join("");
+}
+
 // per-point peak wind (mph) for any (model, category, vector index),
 // respecting the current land-effect selector. cat = "cat1|cat3|cat5".
 // Returns the string "kd-pending" if Powell K&D is selected but not yet precomputed.
+// land model = two independent toggles. decay -> K&D inland decay (Powell uses the
+// precomputed kd field; live models recompute with decay). roughness -> per-vertex
+// terrain multiplier. They compose: combined = decay_peak x roughness_factor,
+// exact because the roughness factor is time-independent.
+function landState() {
+  return {
+    rough: document.getElementById("landRoughness").checked,
+    decay: document.getElementById("landDecay").checked,
+  };
+}
+
+function applyRoughness(wind) {
+  if (!wind || typeof wind === "string" || !state.roughness) return wind;
+  const f = state.roughness.factors;
+  return Array.from(wind, (w, i) => w * f[i]);
+}
+
 function computeWindFor(model, cat, vIdx) {
-  const land = document.getElementById("landEffect").value;
+  const { rough, decay } = landState();
   const rec = state.inputs ? state.inputs[cat][vIdx] : null;
 
+  let wind;
   if (model === "powell") {
-    if (land === "kd") {
+    if (decay) {
       if (!state.powellKd || !state.powellKd[cat]) return "kd-pending";
-      return state.powellKd[cat][vIdx];
+      wind = state.powellKd[cat][vIdx];
+    } else {
+      if (!state.powell || !state.powell[cat]) return null;
+      wind = state.powell[cat][vIdx];
     }
-    if (!state.powell || !state.powell[cat]) return null;
-    let wind = state.powell[cat][vIdx];
-    if (land === "roughness" && state.roughness) {
-      const f = state.roughness.factors;
-      wind = Array.from(wind, (w, i) => w * f[i]);
-    }
-    return wind;
+  } else {
+    // live Holland / Willoughby
+    if (!rec) return null;
+    const B = quantileToB(rec.WSP);
+    wind = decay ? computeLiveWindKD(model, rec, B, state.grid.points)
+                 : computeLiveWind(model, rec, B, state.grid.points);
   }
-
-  // live Holland / Willoughby
-  if (!rec) return null;
-  const B = quantileToB(rec.WSP);
-  if (land === "kd") return computeLiveWindKD(model, rec, B, state.grid.points);
-  let wind = computeLiveWind(model, rec, B, state.grid.points);
-  if (land === "roughness" && state.roughness) {
-    const f = state.roughness.factors;
-    wind = Array.from(wind, (w, i) => w * f[i]);
-  }
-  return wind;
+  return rough ? applyRoughness(wind) : wind;
 }
 
 function computeWind() {
@@ -224,6 +261,31 @@ function computeWind() {
   if (state.meanMode) return computeMeanWind(model, cat);
   if (state.maxMode) return computeMaxWind(model, cat);
   return computeWindFor(model, cat, vIdx);
+}
+
+// signature of everything that affects the peak-wind array. Toggling display
+// (points<->contour), colorBy, layers, theme etc. does NOT change it, so we can
+// reuse the cached field instead of recomputing (live Holland/Willoughby Mean/Max
+// over 100 vectors x 2161 steps is ~10s — far too slow to repeat per toggle).
+function windCacheKey() {
+  const { model, cat, vIdx } = currentSelection();
+  const agg = state.meanMode ? "mean" : state.maxMode ? "max" : "v" + vIdx;
+  const { rough, decay } = landState();
+  const bdist = document.getElementById("bdist").value;
+  let bp = "";
+  document.querySelectorAll("#bparams input").forEach(i => { bp += i.dataset.key + "=" + i.value + ";"; });
+  return [model, cat, agg, "r" + rough + "d" + decay, bdist, bp].join("|");
+}
+
+// computeWind() with memoization on windCacheKey(); only valid arrays are cached
+// (null / "kd-pending" are cheap and re-evaluated each time).
+function computeWindCached() {
+  const key = windCacheKey();
+  if (key === state.windKey && state.windCache) return state.windCache;
+  const wind = computeWind();
+  if (wind && typeof wind !== "string") { state.windCache = wind; state.windKey = key; }
+  else { state.windCache = null; state.windKey = null; }
+  return wind;
 }
 
 // label for the active aggregation mode ("mean" | "max"), or null for single-vector
@@ -381,6 +443,19 @@ function pointInfoHTML(i) {
     }
     wtxt += "<br>";
   }
+  // surface roughness at this vertex: physical z0 (mm) + the wind multiplier it
+  // produces + the land-cover label — lets the modeler inspect land/water coding
+  // and point-to-point roughness differences that drive loss spread.
+  let rtxt = "";
+  const R = state.roughness;
+  if (R && R.z0_mm) {
+    const cls = R.center_class ? R.center_class[i] : null;
+    const name = (cls != null && R.class_names) ? R.class_names[String(cls)] : null;
+    // cover = exact NLCD pixel at the point (land/water truth); z0 + factor are the
+    // fetch-blended values the model actually applies (may differ near shorelines).
+    rtxt = `<br>cover ${name || "?"} &middot; z0 ${R.z0_mm[i]} mm (fetch) &middot; ` +
+           `&times;${R.factors[i].toFixed(3)}`;
+  }
   const params = agg
     ? `<hr>${agg} over all 100 input vectors`
     : (rec
@@ -389,7 +464,7 @@ function pointInfoHTML(i) {
         `CF ${rec.CF} &middot; WSP ${rec.WSP} (B=${quantileToB(rec.WSP).toFixed(2)})`
       : "");
   return `${wtxt}(${p.ew}, ${p.ns}) mi<br>${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}<br>` +
-         `${p.land ? "land" : "water"}${p.place ? " &middot; " + p.place : ""}${params}`;
+         `${p.land ? "land" : "water"}${p.place ? " &middot; " + p.place : ""}${rtxt}${params}`;
 }
 
 function rebuildPixelIndex() {
@@ -453,9 +528,10 @@ function updateField() {
   const colorBy = document.getElementById("colorBy").value;
   const { model, rec } = currentSelection();
   renderLegend(colorBy);
+  updateVecRow();
 
   const needWind = colorBy === "wind" || colorBy === "loss";
-  let wind = needWind ? computeWind() : null;
+  let wind = needWind ? computeWindCached() : null;
   const kdPending = wind === "kd-pending";
   if (kdPending) wind = null;
   state.wind = wind;
@@ -593,7 +669,8 @@ function wireControls() {
 
   document.getElementById("showWater").addEventListener("change", updateField);
   document.getElementById("showGrid").addEventListener("change", updateField);
-  document.getElementById("landEffect").addEventListener("change", updateField);
+  document.getElementById("landRoughness").addEventListener("change", updateField);
+  document.getElementById("landDecay").addEventListener("change", updateField);
   document.getElementById("theme").addEventListener("change", e => applyTheme(e.target.value));
   document.getElementById("showTrack").addEventListener("change", e => {
     if (e.target.checked) state.layers.track.addTo(state.map);

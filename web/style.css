@@ -16,7 +16,7 @@ body { display: flex; }
 #sidebar select, #sidebar input[type="range"] { width: 100%; }
 #sidebar select { padding: 5px; background: #0f1620; color: #e6edf3;
   border: 1px solid #2c3947; border-radius: 5px; }
-#layers label { display: block; font-size: 13px; margin: 4px 0; }
+#layers label, #landmodel label { display: block; font-size: 13px; margin: 4px 0; }
 #bparams { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 #bparams label { font-size: 11px; color: #9fb0c0; flex: 1; min-width: 60px; }
 #bparams input { width: 100%; padding: 4px; background: #0f1620; color: #e6edf3;
@@ -69,6 +69,18 @@ body.theme-light .analysis-group:hover { background: #d4dce5; }
   border: none; border-radius: 5px; font-size: 13px; }
 .vec-btn:hover { background: #1d4ed8; }
 .vec-btn.active { background: #059669; }
+
+/* thin horizontal strip of the selected input vector's parameters (single-vector
+   mode only — hidden when Mean/Max aggregation is active) */
+.vec-row { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 8px; }
+.vec-row.hidden { display: none; }
+.vec-row .vc { display: flex; flex-direction: column; line-height: 1.2; }
+.vec-row .vc .k { font-size: 9px; text-transform: uppercase; letter-spacing: .04em;
+  color: #8fa3b6; }
+.vec-row .vc .v { font-size: 12px; font-weight: 600; color: #e6edf3;
+  font-variant-numeric: tabular-nums; }
+body.theme-light .vec-row .vc .k { color: #5a6b7c; }
+body.theme-light .vec-row .vc .v { color: #1c2530; }
 #vector:disabled { opacity: .4; }
 
 /* analysis chart panels (draggable + resizable floating windows) */

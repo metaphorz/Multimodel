@@ -26,13 +26,16 @@ URL = "http://localhost:8012/web/index.html"
 FIGURES = [
     ("grid_basemap",     {"model": "holland", "colorBy": "landwater", "display": "points"}, None),
     ("powell_cat5_pts",  {"model": "powell", "category": "5", "vector": 1,
-                          "colorBy": "wind", "display": "points", "landEffect": "roughness"}, None),
+                          "colorBy": "wind", "display": "points",
+                          "landRoughness": True, "landDecay": False}, None),
     ("powell_cat5_contour", {"model": "powell", "category": "5", "display": "contour"}, None),
     ("holland_cat3_contour", {"model": "holland", "category": "3", "display": "contour"}, None),
     ("willoughby_cat5_contour", {"model": "willoughby", "category": "5", "display": "contour"}, None),
-    ("powell_cat5_kd",   {"model": "powell", "category": "5", "landEffect": "kd",
+    ("powell_cat5_kd",   {"model": "powell", "category": "5",
+                          "landRoughness": False, "landDecay": True,
                           "colorBy": "wind", "display": "contour"}, None),
-    ("powell_cat5_loss", {"model": "powell", "category": "5", "landEffect": "roughness",
+    ("powell_cat5_loss", {"model": "powell", "category": "5",
+                          "landRoughness": False, "landDecay": True,
                           "colorBy": "loss", "display": "contour"}, None),
     ("light_theme",      {"theme": "light", "model": "powell", "category": "3",
                           "display": "points", "colorBy": "wind"}, None),
@@ -103,6 +106,8 @@ def main():
     opts.add_argument("--force-device-scale-factor=2")
     opts.add_argument("--hide-scrollbars")
     drv = webdriver.Chrome(options=opts)
+    drv.set_script_timeout(180)   # live Holland/Willoughby _js figures recompute
+                                  # 100 vectors over the 36-h window (can take ~15-30s)
     try:
         for name, controls, sel in figures:
             drv.get(URL)

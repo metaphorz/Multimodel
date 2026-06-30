@@ -39,9 +39,15 @@ MILE_M = 1609.344
 MS_TO_MPH = 2.2369362920544
 LAT0 = 25.8611          # landfall latitude; storm tracks due west at constant lat
 BEARING = 270.0         # due west
-# fine time sampling for the 12-hr peak envelope (hourly is too coarse vs the
-# storm's fast westward motion -> aliasing; dt=0.1h gives a smooth true peak)
-T_MAX, T_DT = 12.0, 0.1
+# fine time sampling for the peak envelope (hourly is too coarse vs the storm's
+# fast westward motion -> aliasing; dt=1/60h (1-min) removes residual aliasing at
+# negligible cost -- the PDE solve is per-storm, not per-timestep).
+# Window: t=0 is the storm center at ew=0 (east edge). The 12-hr lead-in (t<0,
+# storm approaching from the Atlantic, off-grid to the east) lets coastal cells
+# experience the FRONT-side maximum, not just the back side after passage; the
+# run extends to +24h so even the slowest storm (VT~10 mph, west edge at t~11.5h)
+# fully traverses and clears all 40 grid columns, capturing every cell's back side.
+T_MIN, T_MAX, T_DT = -12.0, 24.0, 1.0 / 60.0
 
 # default WSP-quantile -> Holland B (Uniform[1.0, 2.5])
 B_MIN, B_MAX = 1.0, 2.5
@@ -203,12 +209,12 @@ def main():
     pts = grid["points"]
     ew = torch.tensor([p["ew"] for p in pts], dtype=torch.float32, device=device)
     ns = torch.tensor([p["ns"] for p in pts], dtype=torch.float32, device=device)
-    hours_t = torch.arange(0.0, T_MAX + T_DT / 2, T_DT, dtype=torch.float32, device=device)
+    hours_t = torch.arange(T_MIN, T_MAX + T_DT / 2, T_DT, dtype=torch.float32, device=device)
 
     is_land = build_track_land(grid)
     base = {"unit": "mph", "cat1": [], "cat3": [], "cat5": []}
     import copy
-    out = {**copy.deepcopy(base), "t_max": T_MAX, "t_dt": T_DT,
+    out = {**copy.deepcopy(base), "t_min": T_MIN, "t_max": T_MAX, "t_dt": T_DT,
            "n_steps": int(hours_t.numel()),
            "wsp_to_B": {"dist": "uniform", "min": B_MIN, "max": B_MAX}}
     out_kd = {**copy.deepcopy(base), "note": "Kaplan-DeMaria inland decay + Gulf recovery"}

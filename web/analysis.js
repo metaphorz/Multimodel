@@ -149,7 +149,8 @@ let zTop = 1000;
 
 function getData() {
   const model = document.getElementById("model").value;
-  const land = document.getElementById("landEffect").value;
+  const land = (document.getElementById("landRoughness").checked ? "r" : "") +
+               (document.getElementById("landDecay").checked ? "d" : "");
   const resp = responseVar();
   if (!analysisState.cache || analysisState.cache.model !== model ||
       analysisState.cache.land !== land || analysisState.cache.resp !== resp) {
@@ -278,8 +279,9 @@ function buildMetamodel(model, cat, type) {
   const entry = mmEntry(responseVar(), cat);
   if (!entry) return null;                    // metamodels.json not loaded
   const block = entry[type];
-  const land = document.getElementById("landEffect").value;
-  const isDefault = (model === "powell" && land === "roughness");
+  const rough = document.getElementById("landRoughness").checked;
+  const decay = document.getElementById("landDecay").checked;
+  const isDefault = (model === "powell" && rough && !decay);
   const predict = type === "gpr"
     ? raw => gprPredictRaw(entry, raw) : raw => mlpPredictRaw(entry, raw);
   return { type, stats: inputStats(cat), predict, r2: block.r2, cv: block.cv_r2,
@@ -476,9 +478,9 @@ function drawProfiler() {
 // This preserves the true S-shape that a quadratic metamodel would round away.
 function pointResponse(model, rec, pt) {
   const B = quantileToB(rec.WSP);
-  const land = document.getElementById("landEffect").value;
   const opts = {};
-  if (land === "roughness" && state.roughness) opts.factor = state.roughness.factors[pt.idx];
+  if (document.getElementById("landRoughness").checked && state.roughness)
+    opts.factor = state.roughness.factors[pt.idx];
   const ts = pointTimeSeries(model, rec, B, pt.ew, pt.ns, opts);
   let peak = 0; for (const w of ts.w) if (w > peak) peak = w;
   if (responseVar() === "tlc") { const m = mdrAt(peak); return m == null ? 0 : m * 100; }
@@ -491,10 +493,9 @@ function profilerPredictor() {
   const mm = profilerState.mm, model = document.getElementById("model").value;
   if (profilerState.scale !== "point")
     return { available: true, predict: mm.predict, ymin: mm.ymin, ymax: mm.ymax };
-  const land = document.getElementById("landEffect").value;
-  if (model === "powell" || land === "kd")
+  if (model === "powell" || document.getElementById("landDecay").checked)
     return { available: false, why: "Single-point mode runs live simulation — switch to " +
-      "Holland or Willoughby, with Land model None or Surface roughness." };
+      "Holland or Willoughby and untick Kaplan–DeMaria decay." };
   if (!profilerState.pt)
     return { available: false, why: "Pick a point: click “Pick on map”, then a grid vertex." };
   const keys = mm.stats.map(s => s.v);
@@ -1104,7 +1105,7 @@ function setupAnalysis() {
       document.getElementById(g.dataset.grp).classList.toggle("open");
     }));
   // model / land effect / response / exposure change -> invalidate cache + redraw
-  ["model", "landEffect", "response", "exposureModel"].forEach(id =>
+  ["model", "landRoughness", "landDecay", "response", "exposureModel"].forEach(id =>
     document.getElementById(id).addEventListener("change", () => {
       analysisState.cache = null;
       redrawOpenPanels();
