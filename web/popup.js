@@ -4,13 +4,17 @@
    (2) a per-dot time series of wind over the 12-hour passage.
    Holland/Willoughby render live; Powell uses powell_field.json (post-UA). */
 
-let wfPanel = null;
+// Each left-click spawns its own windfield panel so several can stay open at
+// once (compare different vertices / models side by side). New panels cascade
+// down-right from the last one and are removed from the DOM when closed.
+let wfPanels = [];
+let wfCascade = 0;
 
-function ensureWfPanel() {
-  if (wfPanel) return wfPanel;
+function createWfPanel() {
   const el = document.createElement("div");
   el.className = "analysis-panel wf-panel";
-  el.style.left = "80px"; el.style.top = "80px";
+  const off = (wfCascade++ % 8) * 26;
+  el.style.left = (80 + off) + "px"; el.style.top = (80 + off) + "px";
   el.style.width = "430px"; el.style.height = "560px";
   el.innerHTML =
     `<div class="ap-header"><span class="ap-title">Windfield</span>` +
@@ -18,11 +22,15 @@ function ensureWfPanel() {
     `<div class="ap-body"></div>`;
   document.getElementById("map").appendChild(el);
   if (window.L) { L.DomEvent.disableClickPropagation(el); L.DomEvent.disableScrollPropagation(el); }
-  el.querySelector(".ap-close").addEventListener("click", () => { el.style.display = "none"; });
+  const panel = { el, body: el.querySelector(".ap-body"), title: el.querySelector(".ap-title") };
+  el.querySelector(".ap-close").addEventListener("click", () => {
+    el.remove();
+    wfPanels = wfPanels.filter(p => p !== panel);
+  });
   el.addEventListener("mousedown", () => bringFront(el));
   makeDraggable(el, el.querySelector(".ap-header"));
-  wfPanel = { el, body: el.querySelector(".ap-body"), title: el.querySelector(".ap-title") };
-  return wfPanel;
+  wfPanels.push(panel);
+  return panel;
 }
 
 // Build the windfield body (isotach + time series SVGs + note) for a vertex,
@@ -62,7 +70,7 @@ function windfieldBodyHTML(idx) {
 }
 
 function openWindfieldPopup(idx) {
-  const p = ensureWfPanel();
+  const p = createWfPanel();
   p.el.style.display = "flex";
   bringFront(p.el);
   const { model, cat, vIdx } = currentSelection();
