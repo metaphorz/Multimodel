@@ -666,3 +666,45 @@ spatial-scale test. **Footprint mode keeps the existing metamodel** (unchanged).
 
 ## Review
 _(to be filled in as work proceeds)_
+
+---
+
+# Duration-aware location loss metric (meteorologist request, 2026-07-02)
+
+**Why:** loss accumulates while wind stays above the ~40 mph damage threshold, so
+peak wind alone hides the VT (forward-speed) and size sensitivity you'd most want
+at the location level. Peak→HAZUS-MDR is faithful to the *published* curve (duration
+baked in at one nominal value) but can't express dwell. Option chosen: **#1 — add a
+duration diagnostic alongside the existing loss**, scoped to the single-point (5-point)
+workflow, since footprint stores hold precomputed peak wind only (no time series).
+
+### Plan
+- [x] `#response` selector: add `dwell` (hours V≥40 mph) and `dosage` (∫(V−40)⁺ dt, mph·h).
+- [x] `DAMAGE_THRESHOLD_MPH = 40` constant + `durationMetrics(ts)` helper (integrate ts.w).
+- [x] `pointResponse`: return dwell/dosage from the live per-point time series.
+- [x] Force RSM scaffold + gate footprint scale (SRC panel, footprint profiler, compare)
+      for duration — they'd otherwise mislabel peak-wind as duration.
+- [x] Metric labels/units in the profiler + interaction-matrix headers.
+
+### Review
+All changes confined to `web/analysis.js` (metric + gating), `web/index.html` (two
+selector options). No windfield/physics change — dwell/dosage read the existing
+per-point time series `pointTimeSeries()` already used by the left-click popup.
+
+- Duration metrics work in the **Interaction Profiler / Interaction Matrix at
+  Single-point scale** (the 5-point workflow). Footprint scale, SRC/EPR, and
+  Compare show a "location-level only" note, because the footprint stores hold
+  precomputed **peak** wind per vertex with no time series to integrate.
+- `durationMetrics()` integrates the surface-wind series: dwell = hours ≥ 40 mph,
+  dosage = ∫(V−40)⁺ dt (mph·h).
+- Verified end-to-end (Selenium, `tests/auto/test_duration_metric.py`): at point
+  (6,33), **dwell falls 11.6 h → 6.8 h and dosage 230 → 150 mph·h as VT rises** —
+  the forward-speed sensitivity a peak-only metric collapses. Footprint gated;
+  SRC note shown; no console errors.
+- Fixed a **pre-existing** break in `tests/auto/test_point_response.py` (it never
+  unticked Kaplan–DeMaria decay, which single-point live sim requires — `landDecay`
+  now defaults on). Both tests green.
+- **Docs** (`docs/FormS6.tex`, rebuilt to PDF, 20 pp, clean): loss section now
+  states the peak-driven basis + forward-refs the diagnostic; Response-variable
+  paragraph lists the two new responses; a new "Duration of exposure" paragraph
+  defines dwell/dosage (with $V_0=40$ mph) and cites the $(6,33)$ VT numbers.

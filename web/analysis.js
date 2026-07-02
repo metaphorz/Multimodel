@@ -56,7 +56,35 @@ function solve(A, b) {
 // ---- response variable Y (user-toggleable) -------------------------------
 function responseVar() {
   const el = document.getElementById("response");
-  return el ? el.value : "wind";          // 'wind' | 'tlc'
+  return el ? el.value : "wind";          // 'wind' | 'tlc' | 'dwell' | 'dosage'
+}
+
+// wind speed (mph, surface) at which structural damage begins to accumulate
+// (HAZUS-style ~40 mph). Below this the storm does no loss; above it, loss
+// accrues for as long as the wind stays elevated (the meteorologist's point:
+// loss is accumulated over the passage, not a function of the single peak).
+const DAMAGE_THRESHOLD_MPH = 40;
+
+// duration-of-exposure diagnostics from a per-point wind time series {t,w}:
+//   dwell  = hours the surface wind stays at/above the damage threshold
+//   dosage = ∫ (V − threshold)+ dt  (mph·h) — the excess-wind "area" that
+//            accumulates while the eye passes (dwell weighted by how far over
+//            threshold the wind is). Both re-express VT / size sensitivity that
+//            a peak-only metric collapses. Location-level (single point) only.
+function durationMetrics(ts) {
+  const dt = PHYS.T_DT;                    // hours per sample
+  let hours = 0, dosage = 0;
+  for (const v of ts.w) if (v >= DAMAGE_THRESHOLD_MPH) {
+    hours += dt; dosage += (v - DAMAGE_THRESHOLD_MPH) * dt;
+  }
+  return { hours, dosage };
+}
+
+// duration responses live only at single-point scale — the footprint stores hold
+// precomputed peak wind per vertex, with no time series to integrate.
+function isDurationResp() {
+  const r = responseVar();
+  return r === "dwell" || r === "dosage";
 }
 
 // %TLC(i) = TLC(i)/total exposure as percent = 100 * mean MDR over land points
@@ -270,6 +298,10 @@ function inputStats(cat) {
 // unified metamodel object: { type, stats, predict(raw), r2, cv?, ymin, ymax, note }
 function buildMetamodel(model, cat, type) {
   type = type || currentMetamodel();
+  // duration responses have no precomputed (GPR/MLP) metamodel and are single-point
+  // only; the live RSM fit still yields the input-stat scaffold the point-scale
+  // profiler needs (its footprint surface is gated off below, never shown).
+  if (isDurationResp()) type = "rsm";
   if (type === "rsm") {
     const fit = fitRSM(model, cat);
     if (!fit) return null;
@@ -363,6 +395,15 @@ function renderPanel(mode) {
 function drawChart(mode) {
   const p = panels[mode];
   if (!p || p.el.style.display === "none") return;
+  if (isDurationResp()) {                    // footprint SRC/EPR has no time series
+    p.title.textContent = mode === "epr" ? "Uncertainty — EPR" : "Sensitivity — SRC";
+    p.body.innerHTML = "<p class='note'>Duration metrics (dwell / dosage) are " +
+      "location-level. Open the Interaction Profiler, set Scale = Single point, and " +
+      "pick a vertex to see how dwell/dosage responds to each storm parameter. " +
+      "Footprint-wide SRC/EPR use precomputed peak-wind fields, which carry no " +
+      "time series to integrate.</p>";
+    return;
+  }
   const data = getData().data;
   if (!data) {
     p.title.textContent = mode === "epr" ? "Uncertainty — EPR" : "Sensitivity — SRC";
@@ -482,8 +523,13 @@ function pointResponse(model, rec, pt) {
   if (document.getElementById("landRoughness").checked && state.roughness)
     opts.factor = state.roughness.factors[pt.idx];
   const ts = pointTimeSeries(model, rec, B, pt.ew, pt.ns, opts);
+  const resp = responseVar();
+  if (resp === "dwell" || resp === "dosage") {                 // duration-aware loss proxy
+    const d = durationMetrics(ts);
+    return resp === "dwell" ? d.hours : d.dosage;
+  }
   let peak = 0; for (const w of ts.w) if (w > peak) peak = w;
-  if (responseVar() === "tlc") { const m = mdrAt(peak); return m == null ? 0 : m * 100; }
+  if (resp === "tlc") { const m = mdrAt(peak); return m == null ? 0 : m * 100; }
   return peak;
 }
 
@@ -491,8 +537,13 @@ function pointResponse(model, rec, pt) {
 // direct wind-field simulation at the picked vertex (live models, None/Roughness only).
 function profilerPredictor() {
   const mm = profilerState.mm, model = document.getElementById("model").value;
-  if (profilerState.scale !== "point")
+  if (profilerState.scale !== "point") {
+    if (isDurationResp())
+      return { available: false, why: "Duration metrics (dwell / dosage) are " +
+        "location-level — set Scale to Single point and pick one of the vertices. " +
+        "Footprint fields are precomputed peak wind, with no time series to integrate." };
     return { available: true, predict: mm.predict, ymin: mm.ymin, ymax: mm.ymax };
+  }
   if (model === "powell" || document.getElementById("landDecay").checked)
     return { available: false, why: "Single-point mode runs live simulation — switch to " +
       "Holland or Willoughby and untick Kaplan–DeMaria decay." };
@@ -525,9 +576,11 @@ function buildProfilerDOM() {
   const p = panels["prof"], mm = profilerState.mm;
   const model = document.getElementById("model").value;
   const catN = document.getElementById("category").value;
-  const metricTxt = responseVar() === "tlc"
-    ? (profilerState.scale === "point" ? "%LC at point" : "%TLC")
-    : "peak wind (mph)";
+  const metricTxt =
+    responseVar() === "tlc" ? (profilerState.scale === "point" ? "%LC at point" : "%TLC") :
+    responseVar() === "dwell" ? "hours V≥40 mph" :
+    responseVar() === "dosage" ? "wind dosage (mph·h)" :
+    "peak wind (mph)";
   const view = profilerState.view, scale = profilerState.scale;
   profilerState.pred = profilerPredictor();
   const pred = profilerState.pred;
@@ -759,6 +812,12 @@ function drawCompare() {
   const cat = "cat" + document.getElementById("category").value;
   const catN = document.getElementById("category").value;
   p.title.textContent = "Compare metamodels — Linear / GPR / NN";
+  if (isDurationResp()) {                     // footprint metamodels are peak-based
+    p.body.innerHTML = "<p class='note'>Duration metrics (dwell / dosage) are " +
+      "location-level and have no footprint metamodel. Use the Interaction Profiler " +
+      "at Single-point scale.</p>";
+    return;
+  }
   const types = ["rsm", "gpr", "mlp"];
   const mms = {};
   types.forEach(t => { const m = buildMetamodel(model, cat, t); if (m) mms[t] = m; });

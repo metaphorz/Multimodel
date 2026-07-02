@@ -49,6 +49,10 @@ def main():
             time.sleep(0.4)
 
         sel("model", "holland")     # live model so single-point can simulate
+        # single-point runs a live windfield; Kaplan–DeMaria decay must be off
+        d.execute_script("const c=document.getElementById('landDecay');"
+                         "if(c.checked){c.checked=false;c.dispatchEvent(new Event('change'));}")
+        time.sleep(0.3)
         sel("response", "tlc")      # loss response carries the damage sigmoid
         d.execute_script("[...document.querySelectorAll('.analysis-group')]"
                          ".find(g=>g.dataset.grp==='grpStats').click();")

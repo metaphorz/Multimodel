@@ -286,6 +286,15 @@ grid by MDR, reports total loss and \% exposure, and the hover popup shows
 loss \% and dollars beside the peak wind. Figure~\ref{fig:kdloss} shows Category~5
 Kaplan--DeMaria-decayed wind (left) and the corresponding loss field (right).
 
+Because the published HAZUS/ARA curve is a single-valued function of the
+\emph{peak} gust, the loss reported here is peak-driven: two storms that reach the
+same peak at a location score the same loss even if one holds the point above the
+damage threshold far longer. Duration is embedded in the fragility curve at one
+nominal storm speed rather than re-integrated per event; loss in reality
+accumulates for as long as the wind stays elevated. Section~\ref{sec:metamodel}
+therefore adds a location-level \emph{duration-of-exposure} diagnostic that
+re-exposes the forward-speed and size dependence the peak metric collapses.
+
 \paragraph{Exposure model (the 4th module).}
 Exposure---\emph{how much insured value sits at each location}---is the fourth
 catastrophe-model leg alongside hazard, vulnerability, and finance, and the sidebar
@@ -339,7 +348,9 @@ the total loss cost of input vector $i$ as a percent of total exposure, equal to
 $100\times$ the mean Mean-Damage-Ratio over the 682 land vertices. Switching the
 response re-fits the SRC, EPR, profiler, and CDF panels live (for loss-cost the
 faithful EPR worksheets do not apply, so the $\text{SRC}^2$ variance share is
-used).
+used). Two further responses---\emph{duration} and \emph{wind dosage}---are
+location-level diagnostics available only in single-point mode; they are defined
+with the spatial-scale toggle below.
 
 \paragraph{Second-order metamodel.}
 For the profiler the viewer fits, per category, a standardized second-order
@@ -432,6 +443,33 @@ Figure~\ref{fig:matrix}. The sigmoid that survives at a single location averages
 over the full footprint.}
 \label{fig:matrixpt}
 \end{figure}
+
+\paragraph{Duration of exposure (location-level loss).}
+Damage accumulates for as long as the wind stays above the threshold at which it
+begins ($\sim$40\,mph), so the \emph{peak} wind at a location is an incomplete
+predictor of loss: a slow or large storm holds a point above threshold much longer
+than a fast, compact one of the same peak, yet the peak-driven MDR---and the
+published HAZUS curve (Section~\ref{sec:loss})---score them identically. To make
+this visible at the location level, the Response selector offers two
+duration-of-exposure diagnostics computed by the same direct single-point
+simulation from the per-point wind time series $V(t)$ over the passage,
+\[
+\text{dwell}=\!\!\int_{V(t)\ge V_0}\!\!\!\! dt \ \ (\text{h}),
+\qquad
+\text{dosage}=\!\!\int \big(V(t)-V_0\big)_{+}\, dt \ \ (\text{mph}{\cdot}\text{h}),
+\qquad V_0=40\,\text{mph},
+\]
+where dwell counts the hours the wind exceeds the threshold and dosage weights each
+hour by how far it exceeds it (the excess-wind ``area'' the storm deposits). Both
+are profiled and matrixed exactly like the peak/\%LC responses. The sensitivity the
+peak metric hides is then explicit: at vertex $(6,33)$ the dwell falls from
+$\approx11.6$ to $\approx6.8$\,h and the dosage from $\approx230$ to
+$\approx150$\,mph$\cdot$h as the forward speed $V_T$ sweeps its range---a
+first-order dependence on translation speed that the peak-wind response registers
+as almost flat. These diagnostics are single-point only: the footprint stores hold
+precomputed peak wind per vertex with no time series to integrate, so at footprint
+scale (and in the SRC, EPR, and metamodel-comparison panels) they show a short
+``location-level'' note.
 
 \paragraph{Loss-cost distribution.}
 A companion panel plots the empirical CDF of $\%\text{TLC}(i)$ over the $100$
