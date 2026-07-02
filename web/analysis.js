@@ -570,6 +570,8 @@ function profilerPickPoint(idx) {
   profilerState.marker = L.marker([q.lat, q.lon], { icon: L.divIcon({
     className: "prof-pin", html: "✕", iconSize: [22, 22], iconAnchor: [11, 11] }) }).addTo(state.map);
   buildProfilerDOM();
+  // the financial panel's single-point EP shares this vertex — refresh it if open
+  if (panels.fin && panels.fin.el.style.display !== "none") drawFinancial();
 }
 
 function buildProfilerDOM() {
@@ -880,6 +882,7 @@ function drawCompare() {
 // Annualized mode = an OEP curve combining categories by their event rates.
 const finState = {
   mode: "annual",                         // "annual" | "cond"
+  scale: "domain",                        // "domain" (682-pt aggregate) | "point" (one vertex)
   rates: { 1: 0.20, 3: 0.05, 5: 0.01 },   // events/yr by category (editable assumptions)
   ded: 0,                                  // per-location deductible ($)
   lim: null,                               // per-location limit ($); null -> exposure
@@ -906,6 +909,28 @@ function tlcSeries(model, cat, ded, lim) {
   return out;
 }
 
+// net loss ($) at ONE land vertex per input vector, after per-location deductible +
+// limit — the single-point analogue of tlcSeries(). Same 100 storms/category as the
+// aggregate; only the spatial sum is dropped. Scenario-conditional on the fixed
+// track (parameter uncertainty only, no landfall/heading sampling).
+function pointLossSeries(model, cat, idx, ded, lim) {
+  const recs = state.inputs ? state.inputs[cat] : null;
+  if (!recs || !state.vuln) return null;
+  const pt = state.grid.points[idx];
+  if (!pt || !pt.land) return null;                   // loss only defined on land
+  const exp = exposureAt(idx);
+  const out = [];
+  for (let i = 0; i < recs.length; i++) {
+    const w = computeWindFor(model, cat, i);
+    if (!w || typeof w === "string") return null;     // null / "kd-pending"
+    const lc = mdrAt(w[idx]) * exp;                   // ground-up loss at this vertex
+    let net = Math.max(lc - ded, 0);                  // deductible
+    if (lim != null) net = Math.min(net, lim);        // optional per-location limit
+    out.push(net);
+  }
+  return out;
+}
+
 const fmtM = d => fmtMoney(d);   // adaptive $ (B/M/k), shared with viewer.js
 
 // loss at a target annual exceedance frequency from rate-weighted event samples
@@ -927,8 +952,18 @@ function drawFinancial() {
   const selCat = document.getElementById("category").value;
   p.title.textContent = "Loss EP / Financial";
 
+  // single-point scale reuses the profiler's map-picked vertex
+  const pPt = (finState.scale === "point" && profilerState && profilerState.pt)
+    ? profilerState.pt : null;
+  const ptTxt = pPt ? `(${pPt.ew},${pPt.ns})` : "none";
+
   const controls =
     `<div class="fin-ctl">` +
+    `<div class="fin-scale">` +
+    `<button class="fin-tab${finState.scale === "domain" ? " active" : ""}" data-scale="domain">Domain</button>` +
+    `<button class="fin-tab${finState.scale === "point" ? " active" : ""}" data-scale="point">Single point</button>` +
+    (finState.scale === "point" ? `<span class="prof-ptlbl">${ptTxt}</span>` : "") +
+    `</div>` +
     `<div class="fin-mode">` +
     `<button class="fin-tab${finState.mode === "cond" ? " active" : ""}" data-mode="cond">Conditional</button>` +
     `<button class="fin-tab${finState.mode === "annual" ? " active" : ""}" data-mode="annual">Annualized</button>` +
@@ -944,11 +979,23 @@ function drawFinancial() {
     `placeholder="no cap" value="${finState.lim == null ? "" : finState.lim}"/></label>` +
     `</div></div>`;
 
-  // gather net-loss severity samples per category
+  // single-point scale needs a picked vertex (shared with the profiler)
+  if (finState.scale === "point" && !pPt) {
+    p.body.innerHTML = controls +
+      "<p class='note'>Single-point EP: pick a grid vertex first — open the " +
+      "Interaction Profiler, set Scale to Single point, and click “Pick on map”. " +
+      "The financial panel then uses that vertex.</p>";
+    wireFinControls(p);
+    return;
+  }
+
+  // gather net-loss severity samples per category (domain aggregate, or one vertex)
   const cats = [1, 3, 5];
   const sev = {};
   for (const c of cats) {
-    const s = tlcSeries(model, "cat" + c, finState.ded, finState.lim);
+    const s = finState.scale === "point"
+      ? pointLossSeries(model, "cat" + c, pPt.idx, finState.ded, finState.lim)
+      : tlcSeries(model, "cat" + c, finState.ded, finState.lim);
     if (!s) {
       p.body.innerHTML = controls +
         "<p class='note'>Loss unavailable — vulnerability curve not loaded, or Powell " +
@@ -1053,22 +1100,37 @@ function drawFinancial() {
       `</table>`;
   }
 
+  const scaleTxt = finState.scale === "point"
+    ? `single point ${ptTxt}, exposure ${fmtM(exposureAt(pPt.idx))}`
+    : `domain aggregate · exposure ${exposureMode()} · total ${fmtM(totalExposure())}`;
+  const ptCaveat = finState.scale === "point"
+    ? `<br><b>Scenario-conditional:</b> all storms run the same fixed track, so this ` +
+      `per-point EP samples storm-parameter uncertainty only — not landfall/heading. ` +
+      `Per-point AAL is biased and its variability understated relative to a ` +
+      `track-sampled model; read it as “given these 100 storms on this track.”`
+    : "";
   p.body.innerHTML = controls + svg + metrics +
-    `<p class="note">${model} · severity over 100 input vectors / category · ` +
-    `exposure: ${exposureMode()} · total ${fmtM(totalExposure())}` +
+    `<p class="note">${model} · severity over 100 input vectors / category · ${scaleTxt}` +
     `${finState.mode === "annual" ? " · red dots = 50/100/250-yr losses" : " · Cat " + selCat}` +
     `<br>Deductible/limit are per-location (under Census, a location is the cell ` +
-    `aggregate). Terms are scoped to this panel; the map shows ground-up loss.</p>`;
+    `aggregate). Terms are scoped to this panel; the map shows ground-up loss.${ptCaveat}</p>`;
   wireFinControls(p);
 }
 
 function wireFinControls(p) {
-  p.body.querySelectorAll(".fin-tab").forEach(b =>
+  // rates + deductible/limit also drive the AAL map (colorBy=aal); refresh it if active
+  const refreshAALMap = () => {
+    if (typeof updateField === "function" &&
+        document.getElementById("colorBy").value === "aal") updateField();
+  };
+  p.body.querySelectorAll(".fin-tab[data-mode]").forEach(b =>
     b.addEventListener("click", () => { finState.mode = b.dataset.mode; drawFinancial(); }));
+  p.body.querySelectorAll(".fin-tab[data-scale]").forEach(b =>
+    b.addEventListener("click", () => { finState.scale = b.dataset.scale; drawFinancial(); }));
   p.body.querySelectorAll("[data-rate]").forEach(inp =>
     inp.addEventListener("change", () => {
       finState.rates[+inp.dataset.rate] = Math.max(0, parseFloat(inp.value) || 0);
-      drawFinancial();
+      drawFinancial(); refreshAALMap();
     }));
   p.body.querySelectorAll("[data-fin]").forEach(inp =>
     inp.addEventListener("change", () => {
@@ -1076,7 +1138,7 @@ function wireFinControls(p) {
       // blank Limit = no cap (null); deductible blank = 0
       finState[inp.dataset.fin] = (blank && inp.dataset.fin === "lim")
         ? null : Math.max(0, parseFloat(inp.value) || 0);
-      drawFinancial();
+      drawFinancial(); refreshAALMap();
     }));
 }
 

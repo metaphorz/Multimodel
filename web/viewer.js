@@ -156,11 +156,64 @@ function lossColor(mdr) {
   return c;
 }
 
+// ---- per-point AAL (expected annual loss) --------------------------------
+// AAL(x) = Σ_c λ_c · mean_i[ net loss at vertex x for cat-c vector i ], using the
+// financial panel's rates + deductible/limit. Same 100 storms/category as the EP
+// panel; scenario-conditional on the fixed track (parameter uncertainty only).
+// Returns a Float64Array over all grid points ($), or "kd-pending"/null if no field.
+function computePointAAL(model) {
+  if (!state.inputs || !state.vuln) return null;
+  const cats = [1, 3, 5], pts = state.grid.points, N = pts.length;
+  const ded = finState.ded, lim = finState.lim;
+  const exp = new Float64Array(N);
+  for (let i = 0; i < N; i++) exp[i] = pts[i].land ? exposureAt(i) : 0;
+  const aal = new Float64Array(N);
+  for (const c of cats) {
+    const rate = finState.rates[c] || 0;
+    if (rate === 0) continue;
+    const recs = state.inputs["cat" + c], nv = recs.length;
+    const sum = new Float64Array(N);
+    for (let v = 0; v < nv; v++) {
+      const w = computeWindFor(model, "cat" + c, v);
+      if (!w || typeof w === "string") return typeof w === "string" ? w : null;
+      for (let i = 0; i < N; i++) {
+        if (exp[i] === 0) continue;
+        let net = Math.max(mdrAt(w[i]) * exp[i] - ded, 0);
+        if (lim != null) net = Math.min(net, lim);
+        sum[i] += net;
+      }
+    }
+    for (let i = 0; i < N; i++) aal[i] += rate * sum[i] / nv;
+  }
+  return aal;
+}
+
+// AAL colour ramp on the normalized fraction f = AAL/AAL_max (sequential YlOrRd).
+const AAL_STOPS = [
+  [0, "#3b4a5a"], [0.02, "#ffffb2"], [0.05, "#fed976"], [0.10, "#feb24c"],
+  [0.20, "#fd8d3c"], [0.35, "#f03b20"], [0.60, "#bd0026"], [0.85, "#7a0177"],
+];
+function aalColor(frac) {
+  if (frac == null || isNaN(frac)) return "#2b2f36";
+  let c = AAL_STOPS[0][1];
+  for (const [thr, col] of AAL_STOPS) { if (frac >= thr) c = col; else break; }
+  return c;
+}
+
 function renderLegend(mode) {
   const el = document.getElementById("legend");
   if (mode === "loss") {
     el.innerHTML = LOSS_STOPS.map(([thr, col]) =>
       `<div class="lg"><span style="background:${col}"></span>&ge; ${(thr * 100).toFixed(0)}% MDR</div>`).join("");
+    return;
+  }
+  if (mode === "aal") {
+    const mx = state.aalMax || 0;
+    el.innerHTML = mx > 0
+      ? AAL_STOPS.filter(([f]) => f > 0).map(([f, col]) =>
+          `<div class="lg"><span style="background:${col}"></span>&ge; ${fmtMoney(f * mx)}</div>`).join("") +
+        `<div class="lg" style="margin-top:3px">max ${fmtMoney(mx)}/yr</div>`
+      : `<div class="lg">AAL — pending</div>`;
     return;
   }
   if (mode === "landwater") {
@@ -514,6 +567,18 @@ function updateField() {
   const g = state.grid;
   const colorBy = document.getElementById("colorBy").value;
   const { model, rec } = currentSelection();
+
+  // per-point AAL field (expected annual loss $) — its own multi-category compute,
+  // independent of the current category/vector selection. Set aalMax before the
+  // legend so the $ thresholds render.
+  const aalMode = colorBy === "aal";
+  let aal = aalMode ? computePointAAL(model) : null;
+  const aalPending = aal === "kd-pending";
+  if (aalPending) aal = null;
+  let aalMax = 0;
+  if (aal) for (let i = 0; i < aal.length; i++) if (aal[i] > aalMax) aalMax = aal[i];
+  state.aalMax = aalMax;
+
   renderLegend(colorBy);
   updateVecRow();
 
@@ -531,12 +596,15 @@ function updateField() {
   const showGrid = document.getElementById("showGrid").checked;
   const display = document.getElementById("display").value;
   const lossMode = colorBy === "loss";
-  const contourMode = display === "contour" && needWind && !!wind;
+  const contourMode = display === "contour" && ((needWind && !!wind) || (aalMode && !!aal));
 
-  // refresh contour overlay (wind bands, or loss-MDR bands)
+  // refresh contour overlay (wind bands, loss-MDR bands, or AAL $ bands)
   if (state.contour) { state.map.removeLayer(state.contour); state.contour = null; }
   if (contourMode) {
-    if (lossMode && state.vuln) {
+    if (aalMode && aal && aalMax > 0) {
+      const thr = AAL_STOPS.map(s => s[0]).filter(t => t > 0).map(f => f * aalMax);
+      state.contour = buildContourLayer(g, aal, thr, v => aalColor(v / aalMax)).addTo(state.map);
+    } else if (lossMode && state.vuln) {
       const mdrField = Array.from(wind, w => mdrAt(w));
       const thr = LOSS_STOPS.map(s => s[0]).filter(t => t > 0);
       state.contour = buildContourLayer(g, mdrField, thr, lossColor).addTo(state.map);
@@ -551,7 +619,7 @@ function updateField() {
     if (state.layers.landfall) state.layers.landfall.bringToFront();
   }
 
-  let wmax = 0, wsum = 0, n = 0, lossTotal = 0;
+  let wmax = 0, wsum = 0, n = 0, lossTotal = 0, aalTotal = 0;
   g.points.forEach((p, i) => {
     const w = wind ? wind[i] : null;
 
@@ -559,6 +627,8 @@ function updateField() {
     // so the readout stays correct in filled-contour mode (dots hidden).
     if (sensMode) {
       if (p.land && sens && sens[i] >= 0) n++;
+    } else if (aalMode) {
+      if (aal && p.land) { aalTotal += aal[i]; n++; }
     } else if (lossMode) {
       const mdr = w != null ? mdrAt(w) : null;
       if (mdr != null && p.land) { lossTotal += mdr * exposureAt(i); if (w > wmax) wmax = w; n++; }
@@ -577,6 +647,8 @@ function updateField() {
       fill = p.land ? "#6b7785" : "#2b6cb0";
     } else if (sensMode) {
       fill = (p.land && sens && sens[i] >= 0) ? VAR_COLORS[SA_VARS[sens[i]]] : "#243244";
+    } else if (aalMode) {
+      fill = (p.land && aal && aalMax > 0) ? aalColor(aal[i] / aalMax) : "#243244";
     } else if (lossMode) {
       const mdr = w != null ? mdrAt(w) : null;
       fill = p.land ? lossColor(mdr) : "#243244";   // loss only meaningful on land
@@ -590,7 +662,16 @@ function updateField() {
   const tag = `${model.charAt(0).toUpperCase() + model.slice(1)} · ` +
               `${currentSelection().cat.toUpperCase()} ` +
               `${aggLabel() ? aggLabel() + " (100 vectors)" : "v" + document.getElementById("vector").value}`;
-  if (lossMode && wind && state.vuln) {
+  if (aalMode && aal) {
+    const rateTag = `λ ${finState.rates[1]}/${finState.rates[3]}/${finState.rates[5]} per yr`;
+    info.innerHTML = `${model.charAt(0).toUpperCase() + model.slice(1)} · AAL (all cats) · ${rateTag}` +
+      `<br>Domain AAL over ${n} land pts <b>${fmtMoney(aalTotal)}/yr</b>` +
+      `<br>max <b>${fmtMoney(state.aalMax)}/yr</b> · exposure ${exposureMode()}`;
+  } else if (aalMode && aalPending) {
+    info.textContent = "Powell Kaplan–DeMaria field: AAL precompute pending.";
+  } else if (aalMode) {
+    info.textContent = "AAL needs inputs + vulnerability curve loaded…";
+  } else if (lossMode && wind && state.vuln) {
     const pct = lossTotal / totalExposure() * 100;
     info.innerHTML = `${tag}<br>Loss over ${n} land pts <b>${fmtMoney(lossTotal)}</b>` +
       `<br>= <b>${pct.toFixed(2)}%</b> of ${fmtMoney(totalExposure())} exposure (${exposureMode()})`;

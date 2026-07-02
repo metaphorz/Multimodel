@@ -512,6 +512,44 @@ metrics. Category~5 weighting shown; Powell.}
 \label{fig:financial}
 \end{figure}
 
+\paragraph{Per-point EP and the AAL map (location-level loss).}
+A second review comment asked to see the exceedance curve not only for the domain
+aggregate but for an \emph{individual} grid point. A \textbf{Domain\,$\,\leftrightarrow\,$Single
+point} toggle on the financial panel does this: in single-point mode the severity
+samples are the loss at one map-picked vertex (shared with the profiler's pick)
+rather than the $682$-vertex sum, and the identical conditional / annualized /
+AAL / TVaR construction runs on them. The sampling is in fact the \emph{same} as
+the aggregate---each point draws on the same $100$ Latin-hypercube vectors per
+category; the aggregate does not use more storms, it averages over space---so the
+per-point curve is no more thinly sampled than the domain curve (the $250$-year
+point rests on the top one or two events in both). A companion map colouring,
+\textbf{Annual loss (AAL~\$)}, paints every land vertex by its expected annual loss
+$\mathrm{AAL}(x)=\sum_c \lambda_c\,\overline{L_c(x)}$ under the same rates and
+terms, so the spatial variability of loss is visible at a glance
+(Figure~\ref{fig:aalmap}). The important caveat is structural: because every
+simulated storm follows the \emph{same} fixed due-west track and only the six storm
+parameters vary, a point's loss distribution samples parameter uncertainty
+\emph{only}, not landfall-location or heading uncertainty. Per-point AAL is
+therefore biased (a vertex that always lies near the eyewall on this track is
+overstated; a weak-quadrant vertex understated) and its variability is understated
+relative to a track-sampled model. The per-point EP is thus \emph{scenario-
+conditional}---``given these $100$ storms on this track''---and the panel says so;
+read across points it is a faithful and useful picture of how loss varies over the
+footprint under the ROA's fixed-track suite. (Because per-point loss reads the
+precomputed peak-wind field rather than a live simulation, this works for every
+wind model, including Powell and with Kaplan--DeMaria decay.)
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\textwidth]{aal_map.png}
+\caption{Per-point expected annual loss (AAL, \$/yr) over the grid (Holland,
+Uniform exposure, rates $\lambda=0.20/0.05/0.01$). Warmer points carry higher
+annual loss; the hottest vertices lie along the storm track where the eyewall
+passes, fading toward the weaker off-track quadrants. The pattern is scenario-
+conditional on the fixed track (parameter uncertainty only).}
+\label{fig:aalmap}
+\end{figure}
+
 The linear, second-order surface above is computed live in the browser. The
 machine-learning metamodels below are instead fit offline and only evaluated in
 the browser.

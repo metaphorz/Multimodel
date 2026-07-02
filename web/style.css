@@ -137,7 +137,7 @@ body.theme-light .vec-row .vc .v { color: #1c2530; }
 
 /* Loss EP / Financial panel controls */
 .fin-ctl { font-size: 11px; color: #334155; margin-bottom: 8px; }
-.fin-mode { display: flex; gap: 6px; margin-bottom: 6px; }
+.fin-mode, .fin-scale { display: flex; gap: 6px; margin-bottom: 6px; align-items: center; }
 .fin-tab { flex: 1; padding: 5px; cursor: pointer; font-size: 12px;
   background: #e2e8f0; color: #1c2530; border: none; border-radius: 5px; }
 .fin-tab.active { background: #2563eb; color: #fff; }

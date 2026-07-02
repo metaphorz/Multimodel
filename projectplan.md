@@ -669,6 +669,55 @@ _(to be filled in as work proceeds)_
 
 ---
 
+# Per-point EP curve + AAL heat-map (meteorologist point 2, 2026-07-02)
+
+**Ask:** the Loss EP panel is a domain aggregate; also show it for an individual
+grid point. "Do we have enough storms/sampling?"
+
+**Answer given:** yes — the per-point severity sample is the *same* 100 LHS vectors
+per category the aggregate already uses (aggregate sums over 682 pts, it isn't more
+storms). Per-point loss = MDR(peak wind at pt)·exposure is already computed for the
+right-click CSV. EP math is unchanged. Caveats: (a) tail (250-yr) rests on the top
+1–2 samples, same as the aggregate; (b) **fixed track** — every storm runs the same
+due-west 25.86°N line, only the 6 params vary, so per-point EP is *scenario-
+conditional* (parameter uncertainty only, no landfall/heading jitter): per-point AAL
+is biased and variability understated. Frame as "given these 100 storms on this
+track". Works for all models incl. Powell (uses precomputed peak field, not live sim).
+
+**Scope chosen:** EP+AAL at a picked point AND an AAL heat-map over the grid;
+point = reuse `profilerState.pt` (profiler map-pick).
+
+### Plan
+- [x] `pointLossSeries(model, cat, idx, ded, lim)` — 100 per-point net-loss samples.
+- [x] Financial panel: Domain ↔ Single point toggle (finState.scale); single-point
+      feeds pointLossSeries into the existing Conditional/Annualized/AAL/TVaR code;
+      fixed-track caveat note; "pick a point" prompt when none.
+- [x] AAL heat-map: `colorBy=aal` option; `computePointAAL(model)` (Σ_c λ_c·mean
+      per-pt loss); continuous `aalColor` + dynamic $ legend; info readout; contour
+      support; refresh on rate/term change.
+- [x] Selenium test (`test_point_ep_aal.py`); docs paragraph + figure + rebuild.
+
+### Review
+- **Per-point EP** (`web/analysis.js`): `pointLossSeries()` mirrors `tlcSeries()`
+  minus the spatial sum; a Domain↔Single point toggle (`finState.scale`) feeds it
+  into the unchanged EP/AAL/TVaR math. Point = the profiler's map-pick
+  (`profilerState.pt`); `profilerPickPoint` now also refreshes the fin panel. Panel
+  carries the fixed-track/scenario-conditional caveat and a pick prompt when none.
+- **AAL heat-map** (`web/viewer.js`): `colorBy=aal` → `computePointAAL()` (Σ_c λ_c·
+  mean per-pt loss over the 100 vectors), sequential `aalColor` ramp, dynamic $
+  legend, info readout, contour support; rate/term edits refresh the map.
+- **Sampling answer stands:** per-point uses the same 100 vectors/cat as the
+  aggregate. Verified (`tests/auto/test_point_ep_aal.py`): 100 samples/cat; domain
+  AAL ≈ \$873k/yr, point (6,33) ≈ \$4.5k/yr; per-point AAL over land sums back to
+  the domain total; raising λ₅ 0.01→0.05 raises domain AAL 873k→1334k; no console
+  errors. Screenshot-verified both panels render.
+- **Docs** (`docs/FormS6.tex`, +`figures/aal_map.png`, rebuilt 21 pp clean): new
+  "Per-point EP and the AAL map" paragraph + AAL-map figure.
+- Regression: `test_financial`, `test_profiler_cdf`, `test_duration_metric`,
+  `test_point_response` all green.
+
+---
+
 # Duration-aware location loss metric (meteorologist request, 2026-07-02)
 
 **Why:** loss accumulates while wind stays above the ~40 mph damage threshold, so
