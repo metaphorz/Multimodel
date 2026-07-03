@@ -738,6 +738,14 @@ with the instantaneous field and reverts on stop.
   mph, 0 dots ≥ 39 mph across all models) — the storm's outer circulation is nonzero
   but below TS force, so all dots show the single base band (possible follow-up: a
   finer sub-40 ramp to reveal the approaching outer winds).
+- **Dots-not-changing fix (round 4):** the recolour was working (Selenium: the SVG
+  `path` fill and the on-screen pixel both update, `(54,68,82)`→`(63,176,190)`), but
+  the translucent field was drawn ON TOP of the dots and used the same colour scale,
+  so the dots were masked/indistinguishable from the moving field. Fixed by drawing
+  the animation contour on a dedicated lower pane (`animField`, z-index 350, below the
+  overlayPane markers at 400) via a new `buildContourLayer` `opts.pane` — the dynamic
+  dots now sit on top of the field and their live recolouring is clearly visible (the
+  calm eye reads as a dark hole in the lattice).
 
 ---
 

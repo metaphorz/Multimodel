@@ -171,7 +171,7 @@ function animRenderFrame(i) {
   if (state.animContour) { state.map.removeLayer(state.animContour); state.animContour = null; }
   const thr = WIND_STOPS.map(s => s[0]).filter(v => v > 0);
   state.animContour = buildContourLayer(ext.grid, F, thr, windColor,
-    { lattice: ext.lattice, upsample: ANIM.upsample, fillOpacity: ANIM.fillOpacity }).addTo(state.map);
+    { lattice: ext.lattice, upsample: ANIM.upsample, fillOpacity: ANIM.fillOpacity, pane: "animField" }).addTo(state.map);
   // dynamic dots: recolor each grid vertex by the INSTANTANEOUS wind at this frame,
   // so the lattice updates live as the storm passes (offshore ext points have gi<0)
   const gi = ext.gridIdx, mk = state.markers;
@@ -194,6 +194,13 @@ function animRenderFrame(i) {
 
 function animEnter() {
   if (!animPrecompute()) { document.getElementById("simTime").textContent = "unavailable for this selection"; return false; }
+  // draw the moving field on a pane BELOW the grid markers (overlayPane, z 400), so
+  // the dynamic dots sit on top of the field and their live recolouring is visible.
+  if (!state.map.getPane("animField")) {
+    state.map.createPane("animField");
+    state.map.getPane("animField").style.zIndex = 350;
+    state.map.getPane("animField").style.pointerEvents = "none";
+  }
   ANIM.active = true;
   document.getElementById("simBar").classList.add("active");
   ANIM.savedView = { center: state.map.getCenter(), zoom: state.map.getZoom() };
