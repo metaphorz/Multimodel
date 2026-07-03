@@ -730,6 +730,14 @@ with the instantaneous field and reverts on stop.
   animation. `test_anim.py` rewritten to cover Narrow(840)/Wide(2835), zoom behavior,
   and the opacity slider; docs paragraph + figures updated (Wide approach / Narrow
   landfall). Static-contour tests unchanged (opacity default preserved).
+- **Dynamic dots (round 3):** during animation each grid marker recolours to the
+  INSTANTANEOUS wind at its vertex per frame (`animRenderFrame` maps `ext.gridIdx` →
+  `state.markers`), so the lattice updates live and the calm eye reads as a dark hole.
+  `updateField` restores the static coloring on exit. Verified: (6,0) goes base →
+  39–74 mph band as the eye arrives. At t=−12 the grid is uniformly calm (max 13–28
+  mph, 0 dots ≥ 39 mph across all models) — the storm's outer circulation is nonzero
+  but below TS force, so all dots show the single base band (possible follow-up: a
+  finer sub-40 ramp to reveal the approaching outer winds).
 
 ---
 

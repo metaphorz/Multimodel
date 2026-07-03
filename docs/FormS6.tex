@@ -722,7 +722,10 @@ the time slider ($t=-12\to+24$\,h); \textbf{speed} and \textbf{opacity} sliders 
 the playback rate and how far the grid points show through the field. Two view
 buttons choose the extent: \textbf{Narrow} (the default) renders only over the grid
 at the default zoom, so the storm enters from the east edge near $t=0$ and the grid
-points remain visible beneath the translucent bands (Figure~\ref{fig:anim}, right);
+points remain visible beneath the translucent bands; each dot also \emph{recolours
+to the instantaneous wind} at its vertex, so the whole lattice updates live as the
+eye passes---the calm eye reads as a dark hole in the dots (Figure~\ref{fig:anim},
+right);
 \textbf{Wide} extends the render domain east into the Atlantic---sized per storm to
 $12V_T+90$\,mi, since at $t=-12$ the eye is offshore ($\mathrm{ewc}=V_T t<0$)---and
 zooms the map out so the full approach is visible (left). The storm then sweeps west,
@@ -741,10 +744,11 @@ default zoom.
 \caption{Optional storm animation (Holland, Category~5). Left (\textbf{Wide}):
 $t=-12$\,h---the instantaneous windfield offshore over the Atlantic as the storm
 approaches, the map zoomed out over the extended domain. Right (\textbf{Narrow},
-the default): $t=0$---the eye at the coast with the eyewall over
-Miami/Fort~Lauderdale, the translucent bands letting the grid points show through.
-Speed / opacity sliders and Narrow/Wide buttons sit on the control bar; Reset
-restores the static peak-wind footprint at the default zoom.}
+the default): the eye over the grid with the eyewall onshore---the translucent bands
+let the grid points show through, and each dot is recoloured to the instantaneous
+wind (the calm eye a dark hole in the lattice). Speed / opacity sliders and
+Narrow/Wide buttons sit on the control bar; Reset restores the static peak-wind
+footprint at the default zoom.}
 \label{fig:anim}
 \end{figure}
 

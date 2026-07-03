@@ -93,6 +93,18 @@ def main():
         if n["npts"] != 840 or abs(n["zoom"] - zoom0) > 0.001:
             fail.append(f"Narrow should return to 840-pt grid at default zoom, got {n}")
 
+        # 3b. dynamic dots: a coastal vertex recolors between frames as the storm passes
+        click("simNarrow")
+        dyn = d.execute_script("""
+          const idx = state.grid.points.findIndex(p=>p.ew===6 && p.ns===0);
+          animRenderFrame(0);  const c0 = state.markers[idx].options.fillColor;
+          animRenderFrame(24); const c24 = state.markers[idx].options.fillColor;
+          return [c0, c24];
+        """)
+        print("dot color @t-12 vs @t0:", dyn)
+        if dyn[0] == dyn[1]:
+            fail.append(f"grid dot should recolor as the storm passes, got {dyn}")
+
         # 4. Reset exits + restores
         click("simReset")
         after = d.execute_script("return {active:ANIM.active, contour:!!state.animContour, "
