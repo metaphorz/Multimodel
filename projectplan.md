@@ -746,6 +746,14 @@ with the instantaneous field and reverts on stop.
   overlayPane markers at 400) via a new `buildContourLayer` `opts.pane` — the dynamic
   dots now sit on top of the field and their live recolouring is clearly visible (the
   calm eye reads as a dark hole in the lattice).
+- **Running-max dots (round 5):** the meteorologist clarified the dots should build up
+  the PEAK footprint, not show instantaneous wind (which goes calm behind the storm).
+  Changed the per-frame dot colour from instantaneous `F[k]` to the **running maximum
+  up to the current frame** (`max` over `fields[0..i]`), so each vertex lights up when
+  the eyewall arrives and retains its peak; after the storm clears, the lattice equals
+  the static peak-wind footprint. Contour stays instantaneous (still watch the storm
+  cross). Verified: dot (9,6) goes base → `#ffffb2` and stays, equal to the static
+  peak colour; end-frame footprint screenshot matches the reference.
 
 ---
 

@@ -93,17 +93,28 @@ def main():
         if n["npts"] != 840 or abs(n["zoom"] - zoom0) > 0.001:
             fail.append(f"Narrow should return to 840-pt grid at default zoom, got {n}")
 
-        # 3b. dynamic dots: a coastal vertex recolors between frames as the storm passes
+        # 3b. dots paint the PEAK footprint (running max): a vertex is calm at t=-12,
+        # lights up as the storm passes, and STAYS lit at the end (peak retained, not
+        # instantaneous — which would go calm again once the storm clears).
         click("simNarrow")
         dyn = d.execute_script("""
-          const idx = state.grid.points.findIndex(p=>p.ew===6 && p.ns===0);
-          animRenderFrame(0);  const c0 = state.markers[idx].options.fillColor;
-          animRenderFrame(24); const c24 = state.markers[idx].options.fillColor;
-          return [c0, c24];
+          const idx = state.grid.points.findIndex(p=>p.ew===9 && p.ns===6);
+          animRenderFrame(0);  const c0  = state.markers[idx].options.fillColor;
+          animRenderFrame(36); const c36 = state.markers[idx].options.fillColor;
+          animRenderFrame(72); const cEnd = state.markers[idx].options.fillColor;
+          // static peak wind color at this vertex, for comparison
+          const w = computeWindFor('holland','cat5', +document.getElementById('vector').value-1)[idx];
+          return {c0, c36, cEnd, peakColor: windColor(w)};
         """)
-        print("dot color @t-12 vs @t0:", dyn)
-        if dyn[0] == dyn[1]:
-            fail.append(f"grid dot should recolor as the storm passes, got {dyn}")
+        print("dot (9,6) running-max:", dyn)
+        base = "#3b4a5a"
+        if dyn["c0"] != base:
+            fail.append(f"dot should be calm (base) at t=-12, got {dyn['c0']}")
+        if dyn["cEnd"] == base:
+            fail.append("dot should stay LIT after the storm clears (running max), not calm")
+        if dyn["cEnd"] != dyn["peakColor"]:
+            fail.append(f"end-of-animation dot should equal the static peak color "
+                        f"{dyn['peakColor']}, got {dyn['cEnd']}")
 
         # 4. Reset exits + restores
         click("simReset")

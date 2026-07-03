@@ -172,10 +172,14 @@ function animRenderFrame(i) {
   const thr = WIND_STOPS.map(s => s[0]).filter(v => v > 0);
   state.animContour = buildContourLayer(ext.grid, F, thr, windColor,
     { lattice: ext.lattice, upsample: ANIM.upsample, fillOpacity: ANIM.fillOpacity, pane: "animField" }).addTo(state.map);
-  // dynamic dots: recolor each grid vertex by the INSTANTANEOUS wind at this frame,
-  // so the lattice updates live as the storm passes (offshore ext points have gi<0)
+  // dots PAINT the peak footprint: each vertex shows its running-max wind up to the
+  // current time, so it lights up when the eyewall arrives and RETAINS its peak.
+  // After the storm clears, the lattice equals the static peak-wind footprint (the
+  // contour above stays instantaneous, so you still watch the storm cross).
+  const N = F.length, pk = new Float32Array(N);
+  for (let f = 0; f <= ANIM.i; f++) { const Ff = ANIM.fields[f]; for (let k = 0; k < N; k++) if (Ff[k] > pk[k]) pk[k] = Ff[k]; }
   const gi = ext.gridIdx, mk = state.markers;
-  if (mk) for (let k = 0; k < gi.length; k++) { const g = gi[k]; if (g >= 0) mk[g].setStyle({ fillColor: windColor(F[k]) }); }
+  if (mk) for (let k = 0; k < gi.length; k++) { const g = gi[k]; if (g >= 0) mk[g].setStyle({ fillColor: windColor(pk[k]) }); }
   if (state.layers.trackLines) state.layers.trackLines.forEach(l => l.bringToFront());
   if (state.layers.landfall) state.layers.landfall.bringToFront();
 
