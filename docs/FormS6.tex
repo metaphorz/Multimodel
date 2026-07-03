@@ -711,6 +711,37 @@ Print / Save-PDF button.}
 \label{fig:poi}
 \end{figure}
 
+\paragraph{Storm animation (optional).}
+The static map colours each vertex by its \emph{peak over the whole passage}
+(Section~\ref{sec:loss}); to also \emph{watch} the storm cross, an optional control
+bar at the bottom of the map plays the \textbf{instantaneous} windfield as a
+semi-transparent moving contour---the ground-frame view of the same field the
+left-click popup shows storm-relative. It is off by default (the peak footprint
+stays the default view) and nothing animates until the user presses Play or drags
+the time slider ($t=-12\to+24$\,h). Because at $t=-12$ the eye is well east of the
+grid (offshore, $\mathrm{ewc}=V_T t<0$), the render domain is extended east into the
+Atlantic---sized per storm to $12V_T+90$\,mi---and the map zooms out to show the
+approach (Figure~\ref{fig:anim}, left); the storm then sweeps west and the eyewall
+reaches the coast near $t=0$ (right), fully clearing the grid by $t=+24$. A moving
+marker tracks the eye. All three wind models animate the selected input vector
+(Holland/Willoughby live via the same field function as the time series; Powell by
+sampling its stored storm-relative field), with surface roughness and
+Kaplan--DeMaria decay applied per frame. Pressing Reset---or changing any sidebar
+control---exits the animation and restores the static peak-wind footprint at the
+default zoom.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.49\textwidth]{anim_approach.png}\hfill
+\includegraphics[width=0.49\textwidth]{anim_landfall.png}
+\caption{Optional storm animation (Holland, Category~5). Left: $t=-12$\,h---the
+instantaneous windfield offshore over the Atlantic as the storm approaches, the map
+zoomed out over the extended domain. Right: $t=0$---the eye at the coast with the
+eyewall over Miami/Fort~Lauderdale. The bottom control bar plays or scrubs the
+passage; Reset restores the static peak-wind footprint at the default zoom.}
+\label{fig:anim}
+\end{figure}
+
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.46\textwidth]{light_theme.png}\hfill

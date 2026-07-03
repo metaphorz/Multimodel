@@ -171,6 +171,18 @@
       <div id="poiErr" class="poi-err"></div>
       <ul id="poiList"></ul>
     </div>
+
+    <div id="simBar" title="Optional: animate the storm east→west. The default map stays the static peak-wind footprint until you press Play or drag the slider.">
+      <button id="simPlay" title="Play / pause the storm animation">▶</button>
+      <input id="simSlider" type="range" min="0" max="72" value="0" step="1" title="Scrub the storm through time (t = −12 → +24 h)" />
+      <span id="simTime">t = −12.0 h</span>
+      <span class="sim-sep"></span>
+      <span class="sim-cap">speed</span>
+      <input id="simSpeed" type="range" min="1" max="10" value="5" step="1" title="Playback speed" />
+      <span class="sim-sep"></span>
+      <button id="simReset" title="Stop and restore the static footprint at the default zoom">Reset</button>
+      <span class="sim-label">storm animation (optional)</span>
+    </div>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
@@ -184,5 +196,6 @@
   <script src="popup.js"></script>
   <script src="poi.js"></script>
   <script src="viewer.js"></script>
+  <script src="anim.js"></script>
 </body>
 </html>

@@ -511,7 +511,10 @@ function buildMap() {
   const casingColor = trackCasingColor(document.getElementById("theme").value);
   const trackCasing = L.polyline(trackPath, { color: casingColor, weight: 5, opacity: 0.85 });
   const trackLine = L.polyline(trackPath, { color: "#e53e3e", weight: 2.5, dashArray: "6 4" });
-  const t0Marker = L.marker([east.lat, east.lon]).bindPopup("Storm center at t=0 (0,0)");
+  const t0Marker = L.marker([east.lat, east.lon]).bindPopup(
+    "Storm center enters the grid at <b>t=0</b>, (0,0) — the east edge, ≈ landfall.<br>" +
+    "The storm is simulated from <b>t=−12 h</b>, when the eye is still offshore " +
+    "(east of the grid, ewc=VT·t &lt; 0) in the Atlantic, through t=+24 h.");
   state.layers.track = L.layerGroup([trackCasing, trackLine, t0Marker]).addTo(state.map);
   state.layers.trackCasing = trackCasing;               // recolored on theme change
   state.layers.trackLines = [trackCasing, trackLine];   // for bringToFront over contour
@@ -618,6 +621,9 @@ function setupHover() {
 
 // ---- recolor + popups ----------------------------------------------------
 function updateField() {
+  // storm animation is modal: any sidebar change drops out of it and restores the
+  // static footprint at the default zoom (animExit calls back here with active off).
+  if (typeof ANIM !== "undefined" && ANIM.active) { animExit(); return; }
   const g = state.grid;
   const colorBy = document.getElementById("colorBy").value;
   const { model, rec } = currentSelection();

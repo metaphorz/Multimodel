@@ -63,7 +63,10 @@ function boxBlur(data, w, h, passes, r) {
   return src;
 }
 
-function buildLattice(grid) {
+// build a lattice from a grid-like object ({ew_values, ns_values, points}); does
+// not touch the module global, so callers (e.g. the storm animation) can hold
+// their own extended lattice alongside the static map's.
+function buildLatticeFrom(grid) {
   const ewAsc = [...grid.ew_values].sort((a, b) => a - b);  // east(0)->west(117)
   const nsAsc = [...grid.ns_values].sort((a, b) => a - b);  // south(-15)->north(45)
   const width = ewAsc.length, height = nsAsc.length;
@@ -76,12 +79,14 @@ function buildLattice(grid) {
     pointAt[y][x] = p;
     order[y * width + x] = i;
   });
-  LATTICE = { width, height, ewAsc, nsAsc, pointAt, order };
+  return { width, height, ewAsc, nsAsc, pointAt, order };
 }
 
+function buildLattice(grid) { LATTICE = buildLatticeFrom(grid); }
+
 // fractional grid coords (x=col, y=row, d3 space) -> [lat, lon]
-function gridToLatLng(x, y) {
-  const { width, height, pointAt } = LATTICE;
+function gridToLatLng(x, y, latt) {
+  const { width, height, pointAt } = latt || LATTICE;
   const x0 = Math.max(0, Math.min(width - 1, Math.floor(x)));
   const y0 = Math.max(0, Math.min(height - 1, Math.floor(y)));
   const x1 = Math.min(width - 1, x0 + 1), y1 = Math.min(height - 1, y0 + 1);
@@ -96,17 +101,21 @@ function gridToLatLng(x, y) {
 }
 
 /* Build the filled-contour layer.
-   wind: per-point array (grid.json order), thresholds + colorFn from viewer. */
-function buildContourLayer(grid, wind, thresholds, colorFn) {
-  if (!LATTICE) buildLattice(grid);
-  const { width, height, order } = LATTICE;
+   wind: per-point array (grid.json order), thresholds + colorFn from viewer.
+   opts.lattice: use a caller-supplied lattice (else the module global from `grid`).
+   opts.upsample: refinement factor (default UPSAMPLE); the animation uses a coarser
+   value so its larger extended domain stays fast per frame. */
+function buildContourLayer(grid, wind, thresholds, colorFn, opts = {}) {
+  const lat = opts.lattice || (LATTICE || (buildLattice(grid), LATTICE));
+  const up = opts.upsample || UPSAMPLE;
+  const { width, height, order } = lat;
 
   // data array in d3 order (index = y*width + x)
   const data = new Float64Array(width * height);
   for (let k = 0; k < order.length; k++) data[k] = wind[order[k]];
 
   // refine + lightly blur so marching squares yields smooth bands, not facets
-  const ref = refineField(data, width, height, UPSAMPLE);
+  const ref = refineField(data, width, height, up);
 
   const contours = window.d3.contours().size([ref.width, ref.height]).thresholds(thresholds)(ref.data);
 
@@ -118,7 +127,7 @@ function buildContourLayer(grid, wind, thresholds, colorFn) {
     const col = colorFn(c.value);
     c.coordinates.forEach(poly => {            // poly = [outerRing, ...holes]
       const rings = poly.map(ring => ring.map(
-        ([x, y]) => gridToLatLng((x - 0.5) / UPSAMPLE, (y - 0.5) / UPSAMPLE)));
+        ([x, y]) => gridToLatLng((x - 0.5) / up, (y - 0.5) / up, lat)));
       L.polygon(rings, {
         stroke: false, fillColor: col, fillOpacity: 0.78, interactive: false,
       }).addTo(group);

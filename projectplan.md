@@ -669,6 +669,60 @@ _(to be filled in as work proceeds)_
 
 ---
 
+# Optional storm animation east→west (meteorologist request, 2026-07-03)
+
+**Ask:** watch the storm traverse — a semi-transparent moving windfield contour
+(like the left-click isotachs) sweeping east→west from t=−12 h, with Play + a scrub
+slider below the map. **Optional, NOT the default** (static peak footprint stays
+default). Phase 1 = **wind only**; **all 3 models** incl. Powell.
+
+**Feasible:** `fieldFnFor` gives wind at any (x,y) with the eye at `ewc=VT·t`; a
+full-grid snapshot at t is 840 evals. Powell samples its stored storm-relative
+field (`powell_field.json`, 100 vectors/cat, 81², ±250 km) like the popup does.
+Snapshot ≠ the static peak footprint — animation temporarily overrides coloring
+with the instantaneous field and reverts on stop.
+
+### Plan (revised: option B — extended offshore domain + auto-zoom)
+- [x] `web/anim.js`: per-frame instantaneous wind field over an EXTENDED domain
+      (grid + offshore ew<0 columns sized to `12·VT + 90 mi`), all models; roughness
+      (land only) + KD decay s(t) per frame; cached on storm key.
+- [x] Render: semi-transparent moving contour (reused `buildContourLayer`, coarser
+      upsample=4 for the bigger domain) + moving eye marker; Play/Pause timer +
+      scrub slider + `t` readout.
+- [x] `contour.js` refactored: `buildLatticeFrom` + optional `{lattice, upsample}`
+      so animation uses its own extended lattice without clobbering the static map.
+- [x] Auto-zoom: `fitBounds` to the extended domain on enter; **restore the saved
+      view (default grid zoom) on Reset/exit** (per user).
+- [x] `#simBar` overlay at map bottom + CSS; modal — any sidebar change calls
+      `animExit()` (guarded in `updateField`) → static footprint at default zoom.
+- [x] Optional/not-default: nothing animates until Play/scrub.
+
+### Review
+- New `web/anim.js` (+`anim.js` script tag, `#simBar` HTML/CSS). Off by default;
+  the static peak footprint is untouched until the user presses Play or scrubs.
+- **Extended domain + zoom (option B):** at t=−12 the eye is offshore, so the render
+  domain extends east into the Atlantic (per-storm, sized to VT) and the map zooms
+  out to show the approach; Reset restores the exact pre-animation view + footprint.
+- **All 3 models** animate the selected vector (Holland/Willoughby live; Powell
+  samples `powell_field.json`); roughness + Kaplan–DeMaria decay honored per frame.
+- **Verified** (`tests/auto/test_anim.py`): default off; Play → extended domain
+  (2835 pts), 73 frames, contour+eye, zoom 9→7; t=−12 eye offshore (lon −76.9);
+  t=+24 last frame; Reset restores zoom 9 + markers; all 3 models precompute; a
+  sidebar change drops out of sim mode; no console errors. Screenshot-verified the
+  t=−12 (offshore near the Bahamas) and t=0 (eyewall at Miami) frames.
+- Contour refactor is backward-compatible — `test_mean_max_buttons` and the AAL/IKE
+  map tests still pass. (Pre-existing unrelated failure: `check_interface.py` refs a
+  removed `landEffect` dropdown — the UI uses landRoughness/landDecay checkboxes.)
+- Known cosmetic: the extended render domain is a rectangle, so the lowest (≈40 mph)
+  band clips to a straight offshore edge. Fine for Phase 1.
+- **UX follow-ups:** the bar dragged the map instead of the slider — fixed with
+  `L.DomEvent.disableClickPropagation/disableScrollPropagation` on `#simBar`; lifted
+  the bar up (bottom 74 px) so it's easy to grab; added a **separate speed slider**
+  (1..10 → 500..50 ms/frame via `animFrameMs()`, live-applied while playing). Docs
+  figures regenerated to match. Test covers the speed mapping.
+
+---
+
 # Integrated Kinetic Energy (IKE) at a grid cell (meteorologist point 3, 2026-07-02)
 
 **Ask:** IKE (TJ) as an integrated per-cell quantity — accumulate ½ρV² every
