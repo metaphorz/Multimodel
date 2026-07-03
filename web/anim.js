@@ -31,7 +31,10 @@ function animStormKey() {
   const { model, cat, vIdx } = currentSelection();
   const rough = document.getElementById("landRoughness").checked;
   const decay = document.getElementById("landDecay").checked;
-  return [model, cat, vIdx, "r" + rough, "d" + decay, ANIM.mode].join("|");
+  // the static target footprint depends on the aggregation mode (mean/max/single),
+  // so include it — switching Mean/Max/vector must re-key the animation.
+  const agg = state.meanMode ? "mean" : state.maxMode ? "max" : "v" + vIdx;
+  return [model, cat, agg, "r" + rough, "d" + decay, ANIM.mode].join("|");
 }
 
 // bilinear sample of a Powell storm-relative field Z (n x n over +/-halfKm) at
@@ -151,7 +154,16 @@ function animPrecompute() {
     }
     fields.push(F);
   }
+  // full live peak per point (denominator of the temporal fraction phi), and the
+  // static target footprint the animation must end on -- computeWindCached() is
+  // aggregation-aware (mean over 100 / max over 100 / single vector), so the final
+  // dots equal exactly what the user sees before animating.
+  const peakLive = new Float32Array(N);
+  for (const Fr of fields) for (let k = 0; k < N; k++) if (Fr[k] > peakLive[k]) peakLive[k] = Fr[k];
+  const target = (typeof computeWindCached === "function") ? computeWindCached() : null;
+  if (!target || typeof target === "string") return false;   // static footprint not ready
   ANIM.fields = fields; ANIM.key = key; ANIM.ext = ext;
+  ANIM.peakLive = peakLive; ANIM.target = target;
   return true;
 }
 
@@ -172,14 +184,21 @@ function animRenderFrame(i) {
   const thr = WIND_STOPS.map(s => s[0]).filter(v => v > 0);
   state.animContour = buildContourLayer(ext.grid, F, thr, windColor,
     { lattice: ext.lattice, upsample: ANIM.upsample, fillOpacity: ANIM.fillOpacity, pane: "animField" }).addTo(state.map);
-  // dots PAINT the peak footprint: each vertex shows its running-max wind up to the
-  // current time, so it lights up when the eyewall arrives and RETAINS its peak.
-  // After the storm clears, the lattice equals the static peak-wind footprint (the
-  // contour above stays instantaneous, so you still watch the storm cross).
+  // dots PAINT the footprint as the storm crosses: value = static_target * phi,
+  // where phi = (running-max live wind up to t) / (full live peak) is the temporal
+  // fraction the storm has delivered at each vertex, and static_target is the
+  // aggregation-aware static field (mean/max/single). phi goes 0..1, so a vertex
+  // lights up when the eyewall arrives and RETAINS it; at t=+24 phi=1 and every dot
+  // equals the static footprint the user saw before animating -- exactly, in any mode.
   const N = F.length, pk = new Float32Array(N);
   for (let f = 0; f <= ANIM.i; f++) { const Ff = ANIM.fields[f]; for (let k = 0; k < N; k++) if (Ff[k] > pk[k]) pk[k] = Ff[k]; }
-  const gi = ext.gridIdx, mk = state.markers;
-  if (mk) for (let k = 0; k < gi.length; k++) { const g = gi[k]; if (g >= 0) mk[g].setStyle({ fillColor: windColor(pk[k]) }); }
+  const gi = ext.gridIdx, mk = state.markers, target = ANIM.target, peakLive = ANIM.peakLive;
+  const last = ANIM.i >= ANIM.frames - 1;
+  if (mk) for (let k = 0; k < gi.length; k++) {
+    const g = gi[k]; if (g < 0) continue;
+    const phi = last ? 1 : (peakLive[k] > 0 ? pk[k] / peakLive[k] : 0);
+    mk[g].setStyle({ fillColor: windColor(target[g] * phi) });
+  }
   if (state.layers.trackLines) state.layers.trackLines.forEach(l => l.bringToFront());
   if (state.layers.landfall) state.layers.landfall.bringToFront();
 

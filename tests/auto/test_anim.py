@@ -93,28 +93,40 @@ def main():
         if n["npts"] != 840 or abs(n["zoom"] - zoom0) > 0.001:
             fail.append(f"Narrow should return to 840-pt grid at default zoom, got {n}")
 
-        # 3b. dots paint the PEAK footprint (running max): a vertex is calm at t=-12,
-        # lights up as the storm passes, and STAYS lit at the end (peak retained, not
-        # instantaneous — which would go calm again once the storm clears).
+        # 3b. INVARIANT: at t=+24 the dots exactly equal the static footprint the user
+        # sees before animating — in MEAN, MAX, and single-vector mode. The animation
+        # only supplies the time-varying build-up (value = static_target * phi).
         click("simNarrow")
-        dyn = d.execute_script("""
-          const idx = state.grid.points.findIndex(p=>p.ew===9 && p.ns===6);
-          animRenderFrame(0);  const c0  = state.markers[idx].options.fillColor;
-          animRenderFrame(36); const c36 = state.markers[idx].options.fillColor;
-          animRenderFrame(72); const cEnd = state.markers[idx].options.fillColor;
-          // static peak wind color at this vertex, for comparison
-          const w = computeWindFor('holland','cat5', +document.getElementById('vector').value-1)[idx];
-          return {c0, c36, cEnd, peakColor: windColor(w)};
+        res = d.execute_script("""
+          function checkMode(setup){
+            setup();
+            ANIM.fields=null; ANIM.key=null;
+            if(!animEnter()) return {mismatch:-1};
+            animPause(); animRenderFrame(ANIM.frames-1);      // end frame (t=+24)
+            const target = computeWindCached();
+            let mismatch=0, n=0;
+            state.grid.points.forEach((p,i)=>{ if(!p.land)return; n++;
+              if(state.markers[i].options.fillColor !== windColor(target[i])) mismatch++; });
+            return {mismatch, n};
+          }
+          const mean   = checkMode(()=>{ state.meanMode=true;  state.maxMode=false; });
+          const mx     = checkMode(()=>{ state.meanMode=false; state.maxMode=true;  });
+          const single = checkMode(()=>{ state.meanMode=false; state.maxMode=false;
+                                         document.getElementById('vector').value=1; });
+          // also confirm the build-up is real: a vertex is calmer mid-passage than at end
+          state.meanMode=true; state.maxMode=false; ANIM.fields=null; ANIM.key=null; animEnter();
+          const idx=state.grid.points.findIndex(p=>p.ew===6 && p.ns===6);
+          animRenderFrame(0);  const c0=state.markers[idx].options.fillColor;
+          animRenderFrame(ANIM.frames-1); const cEnd=state.markers[idx].options.fillColor;
+          return {mean, max:mx, single, c0, cEnd};
         """)
-        print("dot (9,6) running-max:", dyn)
-        base = "#3b4a5a"
-        if dyn["c0"] != base:
-            fail.append(f"dot should be calm (base) at t=-12, got {dyn['c0']}")
-        if dyn["cEnd"] == base:
-            fail.append("dot should stay LIT after the storm clears (running max), not calm")
-        if dyn["cEnd"] != dyn["peakColor"]:
-            fail.append(f"end-of-animation dot should equal the static peak color "
-                        f"{dyn['peakColor']}, got {dyn['cEnd']}")
+        print("end==static:", {k: res[k] for k in ("mean","max","single")}, "build-up:", res["c0"], "->", res["cEnd"])
+        for m in ("mean", "max", "single"):
+            if res[m]["mismatch"] != 0:
+                fail.append(f"{m} mode: end-of-animation dots must equal the static footprint, "
+                            f"{res[m]['mismatch']}/{res[m]['n']} mismatched")
+        if res["c0"] == res["cEnd"]:
+            fail.append("dots should build up over the animation (calm at t=-12, lit at end)")
 
         # 4. Reset exits + restores
         click("simReset")

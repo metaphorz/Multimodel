@@ -722,11 +722,17 @@ the time slider ($t=-12\to+24$\,h); \textbf{speed} and \textbf{opacity} sliders 
 the playback rate and how far the grid points show through the field. Two view
 buttons choose the extent: \textbf{Narrow} (the default) renders only over the grid
 at the default zoom, so the storm enters from the east edge near $t=0$ and the grid
-points remain visible on top of the translucent bands; each dot \emph{paints its
-running-maximum wind}---it lights up when the eyewall arrives and \emph{retains} its
-peak---so the footprint builds up behind the moving storm and, once the storm clears,
-the lattice equals the static peak-wind footprint of Section~\ref{sec:loss}
-(Figure~\ref{fig:anim}, right);
+points remain visible on top of the translucent bands and \emph{paint the footprint}
+as the storm crosses. The precompute already simulated each storm sweeping east to
+west (Section~\ref{sec:loss}: $\mathrm{ew}_c=V_T t$, keeping each vertex's peak over
+$t=-12\to+24$); the animation replays that sweep, so the dots supply only its
+\emph{time-varying build-up} while the magnitude is pinned to the static footprint:
+each dot shows $\text{target}(x)\cdot\varphi(x,t)$, where $\varphi$ is the fraction of
+the peak the storm has delivered at $x$ by time $t$ and $\text{target}$ is the field
+the user already sees. Because $\text{target}$ is aggregation-aware
+(\textbf{Mean}/\textbf{Max}/single vector), a vertex lights up when the eyewall
+arrives, retains its value, and \emph{at $t=+24$ every dot equals the static footprint
+exactly, in whatever mode is set} (Figure~\ref{fig:anim}, right);
 \textbf{Wide} extends the render domain east into the Atlantic---sized per storm to
 $12V_T+90$\,mi, since at $t=-12$ the eye is offshore ($\mathrm{ewc}=V_T t<0$)---and
 zooms the map out so the full approach is visible (left). The storm then sweeps west,

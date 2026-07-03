@@ -748,12 +748,20 @@ with the instantaneous field and reverts on stop.
   calm eye reads as a dark hole in the lattice).
 - **Running-max dots (round 5):** the meteorologist clarified the dots should build up
   the PEAK footprint, not show instantaneous wind (which goes calm behind the storm).
-  Changed the per-frame dot colour from instantaneous `F[k]` to the **running maximum
-  up to the current frame** (`max` over `fields[0..i]`), so each vertex lights up when
-  the eyewall arrives and retains its peak; after the storm clears, the lattice equals
-  the static peak-wind footprint. Contour stays instantaneous (still watch the storm
-  cross). Verified: dot (9,6) goes base → `#ffffb2` and stays, equal to the static
-  peak colour; end-frame footprint screenshot matches the reference.
+  First cut used the running max of the live single storm.
+- **End == static footprint, any mode (round 6):** the running max of the *live single*
+  storm didn't equal the static map, because (a) the default map is the MEAN of 100
+  vectors (not one storm — single-vs-mean diff ~4.9 mph, 110 band mismatches) and (b)
+  the animation's 0.5 h steps undersample the peak vs the pipeline's 1-min sim (~1.3
+  mph, 23 mismatches). The pipeline already simulated each storm east→west
+  (`ew_c=vt·t`, per-vertex max); it stores only the peak, so the animation re-derives
+  only the *timing*. Fix: `dot = target(x)·φ(x,t)`, where `φ` = live running-max /
+  live full-peak (temporal fraction) and `target = computeWindCached()` (mean/max/
+  single-aware). At `t=+24` φ=1, so dots equal the static footprint EXACTLY in every
+  mode. `animStormKey` now includes the agg mode. Verified (Selenium): end-of-anim
+  dots match the static footprint 682/682 in mean, max, and single; build-up real
+  (`#3b4a5a`→`#fd8d3c`); mean-mode end screenshot is pixel-identical to the static
+  mean map. Contour stays instantaneous (still watch the storm cross).
 
 ---
 
