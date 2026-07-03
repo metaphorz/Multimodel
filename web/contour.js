@@ -104,10 +104,13 @@ function gridToLatLng(x, y, latt) {
    wind: per-point array (grid.json order), thresholds + colorFn from viewer.
    opts.lattice: use a caller-supplied lattice (else the module global from `grid`).
    opts.upsample: refinement factor (default UPSAMPLE); the animation uses a coarser
-   value so its larger extended domain stays fast per frame. */
+   value so its larger extended domain stays fast per frame.
+   opts.fillOpacity: band opacity (default 0.78); the animation uses a lower value so
+   the grid points show through the moving windfield. */
 function buildContourLayer(grid, wind, thresholds, colorFn, opts = {}) {
   const lat = opts.lattice || (LATTICE || (buildLattice(grid), LATTICE));
   const up = opts.upsample || UPSAMPLE;
+  const fillOpacity = opts.fillOpacity != null ? opts.fillOpacity : 0.78;
   const { width, height, order } = lat;
 
   // data array in d3 order (index = y*width + x)
@@ -129,7 +132,7 @@ function buildContourLayer(grid, wind, thresholds, colorFn, opts = {}) {
       const rings = poly.map(ring => ring.map(
         ([x, y]) => gridToLatLng((x - 0.5) / up, (y - 0.5) / up, lat)));
       L.polygon(rings, {
-        stroke: false, fillColor: col, fillOpacity: 0.78, interactive: false,
+        stroke: false, fillColor: col, fillOpacity, interactive: false,
       }).addTo(group);
     });
   });

@@ -15,7 +15,8 @@
 
 const ANIM = {
   tMin: -12, tMax: 24, dt: 0.5,   // frame time step (h)
-  marginMi: 90, maxExtraCols: 130, upsample: 4,
+  marginMi: 90, maxExtraCols: 130, upsample: 4, fillOpacity: 0.5,
+  mode: "narrow",                 // "narrow" (grid only, default zoom) | "wide" (offshore + zoom out)
   frames: 0, i: 0, speed: 5,      // speed 1..10 -> frame interval via animFrameMs()
   playing: false, timer: null, active: false,
   fields: null, key: null, ext: null, eye: null, savedView: null,
@@ -30,7 +31,7 @@ function animStormKey() {
   const { model, cat, vIdx } = currentSelection();
   const rough = document.getElementById("landRoughness").checked;
   const decay = document.getElementById("landDecay").checked;
-  return [model, cat, vIdx, "r" + rough, "d" + decay].join("|");
+  return [model, cat, vIdx, "r" + rough, "d" + decay, ANIM.mode].join("|");
 }
 
 // bilinear sample of a Powell storm-relative field Z (n x n over +/-halfKm) at
@@ -50,7 +51,7 @@ function animSamplePowell(Z, n, halfKm, xkm, ykm) {
 // enough to show the eye at t=-12 for this storm's VT. The lattice is regular
 // (lat constant per ns row, lon linear in ew), so offshore lat/lon extrapolate
 // cleanly. Returns {grid, lattice, gridIdx (Int32: real grid index or -1), bounds}.
-function animBuildExtGrid(rec) {
+function animBuildExtGrid(rec, extraCols) {
   const g = state.grid, pts = g.points;
   const nsAsc = [...g.ns_values].sort((a, b) => a - b);
   const ewGrid = [...g.ew_values].sort((a, b) => a - b);   // 0..117
@@ -69,8 +70,6 @@ function animBuildExtGrid(rec) {
   const lonAtEw = ew => lonAt0ns0 + ew * dlonDew;
 
   const step = ewGrid[1] - ewGrid[0];                      // 3 mi
-  const reachMi = 12 * rec.VT + ANIM.marginMi;             // eye at t=-12 + margin
-  const extraCols = Math.min(ANIM.maxExtraCols, Math.ceil(reachMi / step));
   const ewOff = [];
   for (let c = extraCols; c >= 1; c--) ewOff.push(-c * step);   // -..-3, ascending
   const ewAll = ewOff.concat(ewGrid);
@@ -103,7 +102,12 @@ function animPrecompute() {
   const { model, cat, vIdx, rec } = currentSelection();
   if (!rec || !state.grid) return false;
 
-  const ext = animBuildExtGrid(rec);
+  // wide mode extends east to show the offshore approach at t=-12; narrow renders
+  // only on the grid (default zoom, storm enters from the east edge)
+  const step = Math.abs(state.grid.ew_values[1] - state.grid.ew_values[0]) || 3;
+  const extraCols = ANIM.mode === "wide"
+    ? Math.min(ANIM.maxExtraCols, Math.ceil((12 * rec.VT + ANIM.marginMi) / step)) : 0;
+  const ext = animBuildExtGrid(rec, extraCols);
   const P = ext.grid.points, N = P.length, gi = ext.gridIdx;
   ANIM.frames = Math.round((ANIM.tMax - ANIM.tMin) / ANIM.dt) + 1;
   const rough = document.getElementById("landRoughness").checked && !!state.roughness;
@@ -167,7 +171,7 @@ function animRenderFrame(i) {
   if (state.animContour) { state.map.removeLayer(state.animContour); state.animContour = null; }
   const thr = WIND_STOPS.map(s => s[0]).filter(v => v > 0);
   state.animContour = buildContourLayer(ext.grid, ANIM.fields[ANIM.i], thr, windColor,
-    { lattice: ext.lattice, upsample: ANIM.upsample }).addTo(state.map);
+    { lattice: ext.lattice, upsample: ANIM.upsample, fillOpacity: ANIM.fillOpacity }).addTo(state.map);
   if (state.layers.trackLines) state.layers.trackLines.forEach(l => l.bringToFront());
   if (state.layers.landfall) state.layers.landfall.bringToFront();
 
@@ -189,11 +193,31 @@ function animEnter() {
   ANIM.active = true;
   document.getElementById("simBar").classList.add("active");
   ANIM.savedView = { center: state.map.getCenter(), zoom: state.map.getZoom() };
-  if (state.markers) state.markers.forEach(m => m.setStyle({ opacity: 0, fillOpacity: 0 }));
+  // keep the grid points visible (they show through the translucent windfield)
+  if (state.markers) state.markers.forEach(m => m.setStyle({ opacity: 1, fillOpacity: 0.9 }));
   if (state.contour) { state.map.removeLayer(state.contour); state.contour = null; }
-  state.map.fitBounds(ANIM.ext.bounds, { padding: [24, 24], animate: false });
+  animApplyZoom();
   animRenderFrame(ANIM.i);
   return true;
+}
+
+// wide -> fit the extended offshore domain; narrow -> the default grid view
+function animApplyZoom() {
+  if (ANIM.mode === "wide") state.map.fitBounds(ANIM.ext.bounds, { padding: [24, 24], animate: false });
+  else if (ANIM.savedView) state.map.setView(ANIM.savedView.center, ANIM.savedView.zoom, { animate: false });
+}
+
+function animSetMode(m) {
+  if (ANIM.mode === m) return;
+  ANIM.mode = m;
+  updateSimModeButtons();
+  if (ANIM.active) { animPrecompute(); animApplyZoom(); animRenderFrame(ANIM.i); }
+}
+
+function updateSimModeButtons() {
+  const nb = document.getElementById("simNarrow"), wb = document.getElementById("simWide");
+  if (nb) nb.classList.toggle("active", ANIM.mode === "narrow");
+  if (wb) wb.classList.toggle("active", ANIM.mode === "wide");
 }
 
 function animExit() {
@@ -234,8 +258,11 @@ function wireSim() {
   const play = document.getElementById("simPlay");
   const slider = document.getElementById("simSlider");
   const speed = document.getElementById("simSpeed");
+  const opacity = document.getElementById("simOpacity");
+  const narrow = document.getElementById("simNarrow");
+  const wide = document.getElementById("simWide");
   const reset = document.getElementById("simReset");
-  if (!bar || !play || !slider || !speed || !reset) return;
+  if (!bar || !play || !slider || !speed || !opacity || !narrow || !wide || !reset) return;
   // keep mouse/scroll events on the control bar from reaching the map underneath,
   // so dragging the slider scrubs instead of panning the map.
   if (window.L) {
@@ -246,6 +273,8 @@ function wireSim() {
   slider.max = Math.round((ANIM.tMax - ANIM.tMin) / ANIM.dt);
   slider.value = 0;
   speed.value = ANIM.speed;
+  opacity.value = Math.round(ANIM.fillOpacity * 100);
+  updateSimModeButtons();
   play.addEventListener("click", () => { ANIM.playing ? animPause() : animPlay(); });
   slider.addEventListener("input", () => {
     if (!ANIM.active && !animEnter()) return;
@@ -255,6 +284,12 @@ function wireSim() {
     ANIM.speed = +speed.value;
     if (ANIM.playing) animStartTimer();   // apply the new rate immediately
   });
+  opacity.addEventListener("input", () => {
+    ANIM.fillOpacity = Math.max(0.05, Math.min(1, +opacity.value / 100));
+    if (ANIM.active && !ANIM.playing) animRenderFrame(ANIM.i);   // live preview when paused
+  });
+  narrow.addEventListener("click", () => animSetMode("narrow"));
+  wide.addEventListener("click", () => animSetMode("wide"));
   reset.addEventListener("click", animExit);
 }
 

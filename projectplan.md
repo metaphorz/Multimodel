@@ -720,6 +720,16 @@ with the instantaneous field and reverts on stop.
   the bar up (bottom 74 px) so it's easy to grab; added a **separate speed slider**
   (1..10 → 500..50 ms/frame via `animFrameMs()`, live-applied while playing). Docs
   figures regenerated to match. Test covers the speed mapping.
+- **Narrow/Wide + opacity (round 2):** added **Narrow** (default — grid only at the
+  default zoom, storm enters from the east edge, no offshore render) and **Wide**
+  (extended offshore domain + zoom-out) view buttons; `ANIM.mode` in the cache key,
+  `animBuildExtGrid(rec, extraCols)` (0 for narrow), `animApplyZoom()`/`animSetMode()`.
+  Windfield is now translucent with the **grid points visible through it** — added an
+  **opacity slider** (`buildContourLayer` gained `opts.fillOpacity`, default 0.78 for
+  the static map; animation defaults 0.5) and stopped hiding the markers during
+  animation. `test_anim.py` rewritten to cover Narrow(840)/Wide(2835), zoom behavior,
+  and the opacity slider; docs paragraph + figures updated (Wide approach / Narrow
+  landfall). Static-contour tests unchanged (opacity default preserved).
 
 ---
 

@@ -179,7 +179,11 @@
       <span class="sim-sep"></span>
       <span class="sim-cap">speed</span>
       <input id="simSpeed" type="range" min="1" max="10" value="5" step="1" title="Playback speed" />
+      <span class="sim-cap">opacity</span>
+      <input id="simOpacity" type="range" min="5" max="100" value="50" step="5" title="Windfield opacity (lower = grid points show through)" />
       <span class="sim-sep"></span>
+      <button id="simNarrow" title="Default: grid extent only (no offshore windfield at t=−12)">Narrow</button>
+      <button id="simWide" title="Zoom out to show the full windfield, including the offshore approach at t=−12">Wide</button>
       <button id="simReset" title="Stop and restore the static footprint at the default zoom">Reset</button>
       <span class="sim-label">storm animation (optional)</span>
     </div>

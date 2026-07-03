@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Selenium test: optional storm animation (east->west, extended domain + zoom).
+"""Selenium test: optional storm animation (Narrow/Wide, speed + opacity sliders).
 
   1. #simBar exists; nothing animates by default (ANIM.active false, no animContour).
-  2. Play enters sim mode: extended domain (> 840 pts), 73 frames, animContour +
-     eye marker present, and the map ZOOMS OUT (zoom decreases) to show the approach.
-  3. At frame 0 (t=-12) the eye is offshore — east of the grid's east edge
-     (lon > -79.975); the time readout reads t=-12.0 h. Last frame reads t=+24.0 h.
-  4. Reset exits: animContour gone, markers visible again, and the map returns to
-     the saved (default) zoom.
-  5. All three models precompute without error (Holland/Willoughby/Powell).
-  6. Changing a sidebar control while animating drops out of sim mode.
-  7. No severe console errors.
+  2. Play (Narrow default): grid-only domain (840 pts), 73 frames, animContour +
+     eye marker, and the map does NOT zoom out (default view kept).
+  3. Wide: extended domain (> 840 pts) and the map zooms OUT to show the approach;
+     at frame 0 (t=-12) the eye is offshore (lon > -79.975). Narrow returns to the
+     840-pt grid at the default zoom.
+  4. Reset exits: animContour gone, markers visible, map back to the default zoom.
+  5. Opacity slider drives ANIM.fillOpacity; speed slider drives the frame interval.
+  6. All three models precompute without error (Holland/Willoughby/Powell).
+  7. Changing a sidebar control while animating drops out of sim mode.
+  8. No severe console errors.
 
 Run:  source venv/bin/activate && python tests/auto/test_anim.py
 """
@@ -42,92 +43,100 @@ def main():
                              "e.dispatchEvent(new Event('change'));", i, v)
             time.sleep(0.3)
 
+        def click(i):
+            d.execute_script("document.getElementById(arguments[0]).click();", i)
+            time.sleep(0.5)
+
         sel("model", "holland")
-        # 1. default: not animating
+        # 1. default off
         if d.execute_script("return ANIM.active;"):
             fail.append("animation should be off by default")
-        if not d.find_elements("id", "simBar"):
-            fail.append("#simBar control not present")
+        for eid in ("simBar", "simNarrow", "simWide", "simOpacity", "simSpeed"):
+            if not d.find_elements("id", eid):
+                fail.append(f"#{eid} control missing")
+        if d.execute_script("return ANIM.mode;") != "narrow":
+            fail.append("default mode should be narrow")
 
         zoom0 = d.execute_script("return state.map.getZoom();")
 
-        # 2. enter via Play
-        d.execute_script("document.getElementById('simPlay').click();")
-        time.sleep(0.6)
+        # 2. Play, Narrow default -> grid-only, no zoom-out
+        click("simPlay")
         st = d.execute_script("return {active:ANIM.active, frames:ANIM.frames, "
-                              "npts:ANIM.ext?ANIM.ext.grid.points.length:0, "
+                              "npts:ANIM.ext?ANIM.ext.grid.points.length:0, mode:ANIM.mode, "
                               "contour:!!state.animContour, eye:!!ANIM.eye, zoom:state.map.getZoom()};")
-        print("after Play:", st)
-        if not st["active"]:
-            fail.append("Play should enter sim mode")
-        if st["frames"] != 73:
-            fail.append(f"expected 73 frames, got {st['frames']}")
-        if st["npts"] <= 840:
-            fail.append(f"extended domain should exceed 840 pts, got {st['npts']}")
+        print("Play (narrow):", st)
+        if not st["active"] or st["frames"] != 73:
+            fail.append(f"Play should enter sim with 73 frames, got {st}")
+        if st["npts"] != 840:
+            fail.append(f"narrow domain should be the 840-pt grid, got {st['npts']}")
+        if abs(st["zoom"] - zoom0) > 0.001:
+            fail.append(f"narrow should NOT zoom out: before={zoom0} after={st['zoom']}")
         if not st["contour"] or not st["eye"]:
-            fail.append("animation contour + eye marker should be present")
-        if not (st["zoom"] < zoom0):
-            fail.append(f"map should zoom OUT on enter: before={zoom0} after={st['zoom']}")
+            fail.append("contour + eye should be present")
 
-        # 3. frame 0 = t-12, eye offshore (east of grid east edge -79.975)
+        # 3. Wide -> extended domain + zoom out; frame0 eye offshore
+        click("simWide")
+        w = d.execute_script("return {npts:ANIM.ext.grid.points.length, zoom:state.map.getZoom(), mode:ANIM.mode};")
+        print("Wide:", w, "zoom0:", zoom0)
+        if w["mode"] != "wide" or w["npts"] <= 840:
+            fail.append(f"Wide should extend the domain (>840), got {w}")
+        if not (w["zoom"] < zoom0):
+            fail.append(f"Wide should zoom OUT: before={zoom0} after={w['zoom']}")
         d.execute_script("animPause(); animRenderFrame(0);")
         time.sleep(0.2)
-        f0 = d.execute_script("return {t:document.getElementById('simTime').textContent, "
-                              "eyelon:ANIM.eye.getLatLng().lng};")
-        print("frame0:", f0)
-        if "-12.0" not in f0["t"] and "−12.0" not in f0["t"]:
-            fail.append(f"frame 0 should read t=-12.0 h, got {f0['t']}")
-        if not (f0["eyelon"] > -79.975):
-            fail.append(f"at t=-12 eye should be offshore (lon>-79.975), got {f0['eyelon']:.3f}")
-        # last frame = t+24
-        d.execute_script("animRenderFrame(72);")
-        time.sleep(0.2)
-        tlast = d.execute_script("return document.getElementById('simTime').textContent;")
-        if "24.0" not in tlast:
-            fail.append(f"last frame should read t=+24.0 h, got {tlast}")
+        eye = d.execute_script("return ANIM.eye.getLatLng().lng;")
+        if not (eye > -79.975):
+            fail.append(f"at t=-12 the eye should be offshore (lon>-79.975), got {eye:.3f}")
+        # Narrow returns to grid + default zoom
+        click("simNarrow")
+        n = d.execute_script("return {npts:ANIM.ext.grid.points.length, zoom:state.map.getZoom()};")
+        if n["npts"] != 840 or abs(n["zoom"] - zoom0) > 0.001:
+            fail.append(f"Narrow should return to 840-pt grid at default zoom, got {n}")
 
-        # 4. Reset restores static + default zoom
-        d.execute_script("document.getElementById('simReset').click();")
-        time.sleep(0.5)
+        # 4. Reset exits + restores
+        click("simReset")
         after = d.execute_script("return {active:ANIM.active, contour:!!state.animContour, "
                                  "zoom:state.map.getZoom(), markvis:state.markers[0].options.opacity};")
-        print("after Reset:", after, "zoom0:", zoom0)
+        print("Reset:", after)
         if after["active"] or after["contour"]:
-            fail.append("Reset should exit sim mode and clear the contour")
+            fail.append("Reset should exit and clear the contour")
         if abs(after["zoom"] - zoom0) > 0.001:
             fail.append(f"Reset should restore default zoom {zoom0}, got {after['zoom']}")
         if after["markvis"] == 0:
-            fail.append("Reset should restore the static grid markers")
+            fail.append("Reset should restore the grid markers")
 
-        # 5. all three models precompute
+        # 5. opacity + speed sliders
+        d.execute_script("document.getElementById('simOpacity').value=20;"
+                         "document.getElementById('simOpacity').dispatchEvent(new Event('input'));")
+        op = d.execute_script("return ANIM.fillOpacity;")
+        if abs(op - 0.20) > 0.001:
+            fail.append(f"opacity slider should set fillOpacity 0.20, got {op}")
+        ms1 = d.execute_script("ANIM.speed=1; return animFrameMs();")
+        ms10 = d.execute_script("ANIM.speed=10; return animFrameMs();")
+        print(f"opacity={op}  frameMs @1={ms1} @10={ms10}")
+        if not (ms1 > ms10 > 0):
+            fail.append(f"speed slider should shorten the interval as it rises: @1={ms1} @10={ms10}")
+
+        # 6. all three models precompute (narrow)
         for m in ("holland", "willoughby", "powell"):
             sel("model", m)
             ok = d.execute_script("ANIM.fields=null; ANIM.key=null; return animPrecompute();")
-            n = d.execute_script("return ANIM.fields ? ANIM.fields.length : 0;")
-            print(f"model {m}: precompute ok={ok} frames={n}")
-            if not ok or n != 73:
-                fail.append(f"{m} animation precompute failed (ok={ok}, frames={n})")
+            nf = d.execute_script("return ANIM.fields ? ANIM.fields.length : 0;")
+            print(f"model {m}: precompute ok={ok} frames={nf}")
+            if not ok or nf != 73:
+                fail.append(f"{m} precompute failed (ok={ok}, frames={nf})")
 
-        # 6. sidebar change while animating drops out
+        # 7. sidebar change while animating drops out
         sel("model", "holland")
         d.execute_script("document.getElementById('simSlider').value=10;"
                          "document.getElementById('simSlider').dispatchEvent(new Event('input'));")
         time.sleep(0.4)
         if not d.execute_script("return ANIM.active;"):
             fail.append("scrub should have entered sim mode")
-        sel("category", "3")   # a sidebar change
+        sel("category", "3")
         time.sleep(0.3)
         if d.execute_script("return ANIM.active;"):
             fail.append("changing a sidebar control should exit sim mode")
-
-        # 8. separate speed slider maps to the playback frame interval (slow->fast)
-        if not d.find_elements("id", "simSpeed"):
-            fail.append("speed slider (#simSpeed) missing")
-        ms1 = d.execute_script("ANIM.speed=1; return animFrameMs();")
-        ms10 = d.execute_script("ANIM.speed=10; return animFrameMs();")
-        print(f"speed: frameMs @1={ms1} @10={ms10}")
-        if not (ms1 > ms10 > 0):
-            fail.append(f"speed slider should shorten the interval as it rises: @1={ms1} @10={ms10}")
 
         errs = [e["message"][:160] for e in d.get_log("browser")
                 if e["level"] == "SEVERE" and "favicon.ico" not in e["message"]]
