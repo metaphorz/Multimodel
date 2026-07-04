@@ -85,15 +85,17 @@ def main():
         if not d.execute_script("return !!profilerState.marker;"):
             fail.append("no map marker after picking a point")
 
-        # 4. Powell in point mode -> unavailable note (no matrix cells)
+        # 4. Powell in point mode is now AVAILABLE via a per-vertex RSM metamodel
+        # (peak wind / %LC), since Powell has no live field to re-simulate.
         sel("model", "powell")
         time.sleep(0.4)
-        note = d.execute_script("return (document.querySelector('.prof-matrix')?"
-                                "document.querySelectorAll('.prof-matrix .prof-cell').length:0);")
-        why = d.execute_script("return profilerState.pred && profilerState.pred.available;")
-        if why:
-            fail.append("Powell single-point should be unavailable")
-        print("Powell point-mode available:", why, "(expect False/None)")
+        pred = d.execute_script("return profilerState.pred && "
+                                "{available:profilerState.pred.available, direct:profilerState.pred.direct};")
+        print("Powell point-mode:", pred, "(expect available, direct=False)")
+        if not (pred and pred.get("available")):
+            fail.append("Powell single-point should now be available (per-vertex metamodel)")
+        if pred and pred.get("direct") is not False:
+            fail.append(f"Powell single-point should be a metamodel (direct=false), got {pred}")
 
         errs = [e for e in d.get_log("browser")
                 if e["level"] == "SEVERE" and "favicon.ico" not in e["message"]]

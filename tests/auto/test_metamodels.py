@@ -48,6 +48,9 @@ def main():
             fails.append("default metamodel is not rsm")
 
         # open profiler; default note must read Linear (RSM)
+        # (expand the collapsible Statistics group so the button is interactable)
+        driver.execute_script("[...document.querySelectorAll('.analysis-group')]"
+                              ".find(g=>g.dataset.grp==='grpStats').click();")
         driver.find_element(By.ID, "btnProf").click()
         wait.until(lambda d: "(100 vectors)" in d.find_element(By.ID, "info").text
                    or "Linear (RSM)" in prof_note(d))

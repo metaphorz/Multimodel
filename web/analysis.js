@@ -224,9 +224,17 @@ function rsmFeatures(z) {
 }
 
 function fitRSM(model, cat) {
+  const y = state.inputs[cat].map((_, i) => outputMetric(model, cat, i));
+  if (y.some(v => v == null)) return null;         // metric unavailable yet
+  return fitRSMFromY(cat, y);
+}
+
+// fit the 2nd-order surface for an explicit per-vector response y (same math as
+// fitRSM, but the caller supplies y). Used for Powell single-point sensitivity,
+// where y is one vertex's peak wind across the 100 vectors.
+function fitRSMFromY(cat, y) {
   const recs = state.inputs[cat], n = recs.length;
-  const y = recs.map((_, i) => outputMetric(model, cat, i));
-  if (y.some(v => v == null)) return null;        // metric unavailable yet
+  if (!y || y.some(v => v == null)) return null;
   const stats = SA_VARS.map(v => {
     const col = recs.map(r => r[v]);
     const m = mean(col), sd = Math.sqrt(variance(col)) || 1;
@@ -257,6 +265,19 @@ function fitRSM(model, cat) {
 function rsmPredict(fit, raw) {
   const z = fit.stats.map((s, i) => (raw[i] - s.m) / s.sd);
   return rsmFeatures(z).reduce((s, fa, a) => s + fa * fit.beta[a], 0);
+}
+
+// Powell single-point sensitivity: fit a per-vertex 2nd-order RSM from the 100
+// precomputed peak winds at vertex idx (Powell has no live field to re-simulate).
+// Uses computeWindFor, so it respects the current land settings (marine vs KD
+// decay, roughness). Returns an RSM fit predicting peak wind at the vertex, null
+// if the field isn't loaded (Powell / KD precompute pending).
+function pointRSMForPoint(model, cat, idx) {
+  const y = state.inputs[cat].map((_, i) => {
+    const w = computeWindFor(model, cat, i);
+    return (!w || typeof w === "string") ? null : w[idx];
+  });
+  return fitRSMFromY(cat, y);
 }
 
 // ---- Phase B: evaluate precomputed GPR / NN metamodels (default config) ---
@@ -572,20 +593,40 @@ function profilerPredictor() {
         "Footprint fields are precomputed peak wind, with no time series to integrate." };
     return { available: true, predict: mm.predict, ymin: mm.ymin, ymax: mm.ymax };
   }
-  if (model === "powell" || document.getElementById("landDecay").checked)
-    return { available: false, why: "Single-point mode runs live simulation — switch to " +
-      "Holland or Willoughby and untick Kaplan–DeMaria decay." };
   if (!profilerState.pt)
     return { available: false, why: "Pick a point: click “Pick on map”, then a grid vertex." };
-  const keys = mm.stats.map(s => s.v);
-  const predict = raw => { const rec = {}; keys.forEach((k, i) => rec[k] = raw[i]);
-                           return pointResponse(model, rec, profilerState.pt); };
+
+  const resp = responseVar();
+  let predict, direct;
+  if (model === "powell") {
+    // Powell has no live field to re-simulate; fit a per-vertex 2nd-order RSM from
+    // the 100 precomputed peaks at this vertex (peak wind / %LC only).
+    if (resp !== "wind" && resp !== "tlc")
+      return { available: false, why: "Powell single-point supports peak wind and %LC " +
+        "(per-vertex metamodel); dwell / dosage / IKE need a live model (Holland/Willoughby)." };
+    const cat = currentSelection().cat;
+    const fit = pointRSMForPoint(model, cat, profilerState.pt.idx);
+    if (!fit) return { available: false, why: "Powell field not loaded yet, or " +
+      "Kaplan–DeMaria precompute pending." };
+    predict = raw => { let peak = rsmPredict(fit, raw); if (peak < 0) peak = 0;
+      if (resp === "tlc") { const m = mdrAt(peak); return m == null ? 0 : m * 100; } return peak; };
+    direct = false;
+  } else {
+    // Holland/Willoughby: direct live simulation at the vertex (decay must be off)
+    if (document.getElementById("landDecay").checked)
+      return { available: false, why: "Single-point mode runs live simulation — switch to " +
+        "Holland or Willoughby and untick Kaplan–DeMaria decay." };
+    const keys = mm.stats.map(s => s.v);
+    predict = raw => { const rec = {}; keys.forEach((k, i) => rec[k] = raw[i]);
+                       return pointResponse(model, rec, profilerState.pt); };
+    direct = true;
+  }
   const means = mm.stats.map(s => s.m); let lo = Infinity, hi = -Infinity;
   mm.stats.forEach((s, i) => { for (let k = 0; k <= 12; k++) {
     const raw = means.slice(); raw[i] = s.min + (k / 12) * (s.max - s.min);
     const y = predict(raw); if (y < lo) lo = y; if (y > hi) hi = y; } });
   const pad = (hi - lo) * 0.06 || 1;
-  return { available: true, predict, ymin: lo - pad, ymax: hi + pad, direct: true };
+  return { available: true, predict, ymin: lo - pad, ymax: hi + pad, direct };
 }
 
 // set the single-point vertex from a map click, drop a crosshair marker, re-render
@@ -631,7 +672,9 @@ function buildProfilerDOM() {
         `<span class="prof-ptlbl">${ptTxt}</span>` : "") +
     `</div>`;
 
-  const srcTxt = scale === "point" ? "direct simulation (no metamodel)" : METAMODEL_LABEL[mm.type];
+  const srcTxt = scale === "point"
+    ? (pred.direct === false ? "per-vertex RSM (Powell)" : "direct simulation (no metamodel)")
+    : METAMODEL_LABEL[mm.type];
   const rng = pred.available ? ` · Y range [${pred.ymin.toFixed(2)}, ${pred.ymax.toFixed(2)}]` : "";
   const fit = scale === "point" ? "" : ` · R²=${mm.r2.toFixed(2)}${mm.note}`;
   const head = `${srcTxt} · ${model} · Cat ${catN} · Y = ${metricTxt}${fit}${rng}`;
@@ -647,7 +690,7 @@ function buildProfilerDOM() {
       `<div class="prof-axis">Cell (row <b>r</b>, col <b>c</b>): effect of <b>c</b> on ${metricTxt} ` +
       `with <b>r</b> at <span style="color:#ef4444">min (red)</span> / ` +
       `<span style="color:#3b82f6">max (blue)</span>, others at mean. ` +
-      (scale === "point" ? `Single point ${ptTxt}, direct simulation. ` : "") +
+      (scale === "point" ? `Single point ${ptTxt}, ${pred.direct === false ? "per-vertex RSM" : "direct simulation"}. ` : "") +
       `Parallel = no interaction; diverging = interaction.</div>` +
       `<div class="prof-matrix" style="grid-template-columns:repeat(${mm.stats.length},1fr)"></div>` +
       `<p class="note">${head}</p>`;

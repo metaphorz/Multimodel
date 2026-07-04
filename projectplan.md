@@ -900,3 +900,34 @@ per-point time series `pointTimeSeries()` already used by the left-click popup.
   states the peak-driven basis + forward-refs the diagnostic; Response-variable
   paragraph lists the two new responses; a new "Duration of exposure" paragraph
   defines dwell/dosage (with $V_0=40$ mph) and cites the $(6,33)$ VT numbers.
+
+---
+
+# Powell single-point sensitivity via per-vertex RSM (meteorologist request, 2026-07-03)
+
+**Ask:** enable single-point (grid-vertex) sensitivity analysis for the Powell wind
+field, which was previously Holland/Willoughby-only.
+
+**Why blocked:** single-point mode does a live re-simulation at the vertex
+(`pointResponse`→`pointTimeSeries`→`fieldFnFor`), analytic H/W only. Powell is an
+offline PDE — the browser has only the per-vertex peak for the 100 sampled vectors.
+
+**Scope chosen:** peak wind + %LC; 2nd-order RSM (live). Duration metrics
+(dwell/dosage/IKE) stay live-model only (need a time series).
+
+### Change (all in web/analysis.js)
+- Refactored `fitRSM`→ core `fitRSMFromY(cat, y)` (fit given an explicit per-vector y).
+- `pointRSMForPoint(model, cat, idx)` — y = each vector's peak at the vertex via
+  `computeWindFor` (respects marine/KD + roughness); fits the 2nd-order RSM.
+- `profilerPredictor`: Powell point-scale now returns a metamodel predictor
+  (`peak = rsmPredict(fit, raw)`, %LC via `mdrAt`), `direct:false`; H/W still direct
+  (decay-off). dwell/dosage/IKE → unavailable note for Powell. Labels show
+  "per-vertex RSM (Powell)" vs "direct simulation".
+
+### Verified
+- `tests/auto/test_powell_singlepoint.py`: Powell single-point wind available &
+  non-direct; `predict(means)`≈mean-of-100 peaks (158.3 vs 158.0); CP sweep moves the
+  curve; %LC≈60%; IKE unavailable; matrix 36 cells; Holland still direct; no console
+  errors. Updated the stale assertion in `test_point_response.py` (Powell single-point
+  is now available) and fixed a pre-existing group-expand break in `test_metamodels.py`.
+  Regression: profiler/cdf/duration/metamodels all green. Docs updated.

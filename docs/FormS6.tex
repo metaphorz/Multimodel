@@ -429,9 +429,14 @@ the point through the steep middle of the damage sigmoid, whereas the footprint 
 $R_{\max}$, smooths the S into a saturating ramp ($517$ of the $682$ land points are
 individually S-shaped). Spatial resolution thus changes both the shape of the loss
 response and the apparent strength of its interactions---a concrete cautionary lesson
-for catastrophe-model interpretation. Single-point mode requires a live model
-(Holland/Willoughby) with Kaplan--DeMaria decay unticked; Powell or decay-on
-show a short note.
+for catastrophe-model interpretation. For \textbf{Holland/Willoughby} single-point
+mode runs this \emph{direct simulation} at the vertex (decay unticked). \textbf{Powell}
+has no closed-form field to re-simulate, so its single-point sensitivity instead fits
+a \emph{per-vertex second-order response surface} live from the 100 precomputed peaks
+at the picked vertex (the same 100-vector data the grid-sensitivity map uses), and the
+profiler sweeps the inputs through it; this covers peak wind and \%LC (the duration
+metrics, which need a time series, remain live-model only). The panel labels which is
+in use---``direct simulation'' vs ``per-vertex RSM''.
 
 \begin{figure}[H]
 \centering
