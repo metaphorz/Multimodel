@@ -612,13 +612,35 @@ function drawProfiler() {
 // direct single-point response (no metamodel): peak wind at the picked vertex for an
 // input record, or its MDR (per-point %LC, in %) when the loss response is active.
 // This preserves the true S-shape that a quadratic metamodel would round away.
-// live wind time series at the picked vertex for a record (roughness applied);
-// shared by pointResponse and the accumulated-loss calibration.
+// storm peak surface wind V0 = max of the storm-relative field, the denominator of
+// the Kaplan–DeMaria intensity schedule (matches the precompute, windfield_grid.py:
+// V0 = surf.max()). Memoized on the intensity/shape params (independent of VT and
+// the vertex), so a single-variable profiler sweep recomputes the field only when
+// those change. Holland/Willoughby only (Powell single-point uses the RSM path).
+const _v0Cache = new Map();
+function stormV0(model, rec, B) {
+  const key = [model, rec.CP, rec.FFP, rec.Rmax, rec.WSP, rec.CF].join(",");
+  let v0 = _v0Cache.get(key);
+  if (v0 === undefined) {
+    const field = stormRelativeField(model, rec, B, 90, 81);
+    v0 = 0; for (const z of field.Z) if (z > v0) v0 = z;
+    _v0Cache.set(key, v0);
+    if (_v0Cache.size > 512) _v0Cache.clear();       // bound memory
+  }
+  return v0;
+}
+
+// live wind time series at the picked vertex for a record; applies surface
+// roughness and/or Kaplan–DeMaria decay to match whatever land toggles are set (so
+// single-point stays consistent with the footprint for any roughness×decay combo).
+// Shared by pointResponse and the accumulated-loss calibration.
 function pointSeriesAt(model, rec, pt) {
   const B = quantileToB(rec.WSP);
   const opts = {};
   if (document.getElementById("landRoughness").checked && state.roughness)
     opts.factor = state.roughness.factors[pt.idx];
+  if (document.getElementById("landDecay").checked)
+    opts.sched = intensitySchedule(stormV0(model, rec, B), rec.VT, state.grid.points);
   return pointTimeSeries(model, rec, B, pt.ew, pt.ns, opts);
 }
 
@@ -673,12 +695,8 @@ function profilerPredictor() {
       if (resp === "tlc") { const m = mdrAt(peak); return m == null ? 0 : m * 100; } return peak; };
     direct = false;
   } else {
-    // Holland/Willoughby: direct live simulation at the vertex (decay must be off)
-    if (document.getElementById("landDecay").checked)
-      return { available: false, why: `Single-point ${model.charAt(0).toUpperCase() + model.slice(1)} ` +
-        "runs a live marine simulation that does not include Kaplan–DeMaria decay — " +
-        "<b>untick the “Kaplan–DeMaria decay” box</b> to enable it. (Powell single-point " +
-        "works with decay because it reads the precomputed decayed field.)" };
+    // Holland/Willoughby: direct live simulation at the vertex, with roughness and/or
+    // Kaplan–DeMaria decay applied per pointSeriesAt() to match the footprint.
     const keys = mm.stats.map(s => s.v);
     predict = raw => { const rec = {}; keys.forEach((k, i) => rec[k] = raw[i]);
                        return pointResponse(model, rec, profilerState.pt); };

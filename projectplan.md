@@ -981,3 +981,26 @@ reduces to HAZUS at nominal duration.
   MDR ceiling, so both are flat there — duration matters at moderate points.)
   Regression: duration/point-response/powell-singlepoint/profiler-cdf all green.
   Docs: rate-integrated MDR paragraph added to the loss section (PDF 25 pp).
+
+---
+
+# Single-point works for all windfields × roughness/decay (meteorologist, 2026-07-04)
+
+**Ask:** single-point profiler must work for all 3 windfields with or without
+roughness and/or decay — consistency.
+
+**Was:** Holland/Willoughby single-point applied roughness but NOT decay, so it was
+gated off when decay was on (Powell already worked via its precomputed KD store).
+
+**Fix (web/analysis.js):** `pointSeriesAt` now applies the Kaplan–DeMaria schedule
+live when decay is on — `opts.sched = intensitySchedule(V0, VT, pts)` with
+`V0 = max(stormRelativeField)` memoized on the intensity/shape params (matches the
+precompute `windfield_grid.py: V0 = surf.max()`). Removed the decay gate in
+`profilerPredictor`'s Holland/Willoughby branch.
+
+**Verified:** `tests/auto/test_singlepoint_landcombos.py` — all 3 windfields × 4
+combos (none/rough/decay/rough+decay) available; Holland/Willoughby live peak matches
+the precomputed footprint within |diff| ≤ 0.05 mph in every combo. Decay bites inland
+(e.g. (60,0): 93.9→65.6, (90,0): 135→86.8) and single-point tracks the footprint to
+~0.02 mph. Regression (point-response, powell-singlepoint, duration, accloss,
+profiler-cdf) all green. Docs updated (PDF 25 pp).
