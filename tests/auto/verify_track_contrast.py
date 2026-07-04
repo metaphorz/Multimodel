@@ -8,7 +8,7 @@ track-contrast fix can be eyeballed.
 Prereq: server running (./start). Then:
     ./venv/bin/python tests/auto/verify_track_contrast.py
 
-Author: Paul Fishwick and Claude Code
+Author: Pro Team & Claude Code
 """
 import time
 from pathlib import Path

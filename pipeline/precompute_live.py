@@ -14,7 +14,7 @@ the precomputed footprint.
 
 Prereq: the viewer server must be running (./start). Then:
     ./venv/bin/python pipeline/precompute_live.py
-Author: Paul Fishwick and Claude Code
+Author: Pro Team & Claude Code
 """
 import json, time
 from pathlib import Path

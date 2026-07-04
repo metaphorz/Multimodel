@@ -11,7 +11,7 @@ The expensive boundary-layer PDE is solved ONCE per storm vector; only the cheap
 field re-sampling is repeated per step size.
 
 Run: ./venv/bin/python docs/make_dt_convergence.py
-Author: Paul Fishwick and Claude Code
+Author: Pro Team & Claude Code
 """
 import os, sys, json
 import numpy as np

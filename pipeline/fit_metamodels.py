@@ -11,7 +11,7 @@ The exported parameters are verified in-process to reproduce scikit-learn's
 predict() within tight tolerance, so the JS evaluators match exactly.
 
 Run:  ./venv/bin/python pipeline/fit_metamodels.py
-Author: Paul Fishwick and Claude Code
+Author: Pro Team & Claude Code
 """
 import json
 from pathlib import Path

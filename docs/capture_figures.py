@@ -8,7 +8,7 @@ Analysis figures are captured as element screenshots of the floating window.
 Prereq: the server must be running (./start). Then:
     ./venv/bin/python docs/capture_figures.py
 
-Author: Paul Fishwick and Claude Code
+Author: Pro Team & Claude Code
 """
 import time
 from pathlib import Path
