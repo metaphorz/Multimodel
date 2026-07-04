@@ -675,8 +675,10 @@ function profilerPredictor() {
   } else {
     // Holland/Willoughby: direct live simulation at the vertex (decay must be off)
     if (document.getElementById("landDecay").checked)
-      return { available: false, why: "Single-point mode runs live simulation — switch to " +
-        "Holland or Willoughby and untick Kaplan–DeMaria decay." };
+      return { available: false, why: `Single-point ${model.charAt(0).toUpperCase() + model.slice(1)} ` +
+        "runs a live marine simulation that does not include Kaplan–DeMaria decay — " +
+        "<b>untick the “Kaplan–DeMaria decay” box</b> to enable it. (Powell single-point " +
+        "works with decay because it reads the precomputed decayed field.)" };
     const keys = mm.stats.map(s => s.v);
     predict = raw => { const rec = {}; keys.forEach((k, i) => rec[k] = raw[i]);
                        return pointResponse(model, rec, profilerState.pt); };
