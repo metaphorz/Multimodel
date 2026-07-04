@@ -153,6 +153,75 @@ isotach plot.}
 \label{fig:contours}
 \end{figure}
 
+\subsection{Numerical methods}\label{sec:numerics}
+All three models produce a \emph{storm-relative} wind field that is then rigidly
+advected across the grid (below); they differ only in \emph{how that field is
+obtained}.
+
+\paragraph{Closed-form profiles (Holland, Willoughby).}
+Both rest on the gradient-wind balance, a quadratic in the wind speed $V$ that is
+solved in \emph{closed form} by the quadratic formula---no iteration and no
+numerical integration; the only ``root'' is analytic:
+\[
+V^2 + f r\,V - \frac{r}{\rho}\frac{dp}{dr}=0
+\;\Longrightarrow\;
+V(r)=\tfrac12\!\left(-f r + \sqrt{(f r)^2 + \tfrac{4r}{\rho}\tfrac{dp}{dr}}\,\right).
+\]
+\textbf{Holland}~\cite{holland} takes $dp/dr$ from its radial pressure profile
+$p(r)=p_c+\Delta p\,e^{-(R_{\max}/r)^B}$, giving $V_g(r)$ directly.
+\textbf{Willoughby}~\cite{willoughby} anchors $V_{\max}$ with the same formula at
+$r=R_{\max}$ and then evaluates a piecewise analytic profile---an inner power law
+$V_{\max}(r/R_{\max})^{n}$ and an outer decay $V_{\max}(r/R_{\max})^{-m}$---blended
+by a logistic transition. Being pure algebra, both are cheap enough to evaluate
+\emph{live} in the browser one vertex at a time (\texttt{web/windfield.js}); this is
+what the single-point profiler and the pop-up isotach use.
+
+\paragraph{Powell: a steady boundary-layer PDE.}
+Powell~\cite{powell,vickery} instead solves the steady, depth-averaged (slab)
+boundary-layer momentum equations for the horizontal wind $\mathbf u=(u,v)$ on a
+radially-stretched polar grid ($N_r=200$, $N_\phi=360$):
+\[
+\frac{\partial \mathbf u}{\partial t}
+= -(\mathbf u\!\cdot\!\nabla)\mathbf u
+  \;-\; f\,\hat{\mathbf z}\times\mathbf u
+  \;-\; \frac{1}{\rho}\nabla p
+  \;+\; K_h\nabla^2\mathbf u
+  \;-\; \frac{C_d\,|\mathbf U_{10}|}{h_{bl}}\,\mathbf u ,
+\]
+i.e.\ nonlinear advection (with the centrifugal $-v^2/r$ term), the Coriolis force,
+the pressure-gradient force from the same Holland radial profile, horizontal
+turbulent diffusion $K_h\nabla^2$, and a wind-dependent surface drag
+$C_d(|\mathbf U_{10}|)$. The solver is \emph{not} a root-finder: it \textbf{marches
+in pseudo-time to steady state} (relaxation / pseudo-transient continuation),
+\[
+\mathbf u \leftarrow \mathbf u + \Delta t\,\mathbf R(\mathbf u),\qquad
+\Delta t=\min\!\Big(\text{CFL}\,\tfrac{\Delta x}{|\mathbf U|},\;
+0.22\,\tfrac{\Delta x^2}{K_h},\;3\,\text{s}\Big),
+\]
+for $\sim$800 explicit steps with a CFL-limited adaptive step (advective and
+diffusive stability), no-slip at the centre and an outer boundary relaxed toward
+gradient balance. The converged field is the \emph{equilibrium} (mature-storm)
+structure---a single steady field, not a time snapshot---to which the translation
+vector is added for the earth-relative wind. At $\sim$2.3\,s per solve (PyTorch/MPS,
+\texttt{hurricane\_pde\_marine.py}) this is far too costly for the browser, so the
+$100$ vectors $\times$ $3$ categories are solved \emph{offline}
+(\texttt{pipeline/windfield\_grid.py}) and only \emph{sampled} at run time---which is
+why Powell single-point sensitivity uses a per-vertex metamodel
+(Section~\ref{sec:metamodel}) rather than a live re-solve.
+
+\paragraph{Frozen-field advection (shared by all three).}
+Each model yields \emph{one} storm-relative field; the footprint is built by
+translating that frozen field due west at the storm speed. With the eye at
+$\mathrm{ew}_c=V_T t$, each vertex's storm-relative radius and azimuth $(r,\phi)$ are
+formed, the frozen field is sampled there (bilinearly, for Powell), converted to the
+surface with CF, and the per-vertex \emph{maximum} over $t\in[-12,+24]$\,h is kept.
+The vortex \emph{structure} never evolves during the passage---the only
+time-dependence is the translation itself (dominant), the optional Kaplan--DeMaria
+intensity decay applied as a scalar $s(t)$ after landfall (magnitude, not shape),
+and surface roughness (a per-vertex terrain factor fixed in the ground frame). This
+is the standard steady-translating-vortex assumption for wind footprints, and it is
+exactly what the optional storm animation (Figure~\ref{fig:anim}) makes visible.
+
 \section{Land effect: roughness and decay}
 The storm's interaction with the land is modelled by two \emph{independent},
 combinable toggles: \textbf{Surface roughness} and \textbf{Kaplan--DeMaria

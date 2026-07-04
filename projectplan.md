@@ -931,3 +931,25 @@ offline PDE — the browser has only the per-vertex peak for the 100 sampled vec
   errors. Updated the stale assertion in `test_point_response.py` (Powell single-point
   is now available) and fixed a pre-existing group-expand break in `test_metamodels.py`.
   Regression: profiler/cdf/duration/metamodels all green. Docs updated.
+
+---
+
+# Numerical Analysis section in docs (meteorologist request, 2026-07-03)
+
+**Ask:** document how each windfield is actually solved.
+
+Added `\subsection{Numerical methods}` (\label{sec:numerics}) to the Wind-field
+models section of docs/FormS6.tex:
+- Closed-form Holland/Willoughby: gradient-wind balance is a quadratic in V solved
+  by the quadratic formula (analytic root, no iteration/integration); Holland uses
+  its radial pressure profile, Willoughby a piecewise power-law blended by a logistic.
+- Powell: steady depth-averaged (slab) boundary-layer momentum PDE on a 200×360
+  polar grid — advection + Coriolis + PGF + Kh diffusion + wind-dependent drag —
+  solved by explicit pseudo-time marching (relaxation) to steady state with a
+  CFL-limited Δt (~800 steps). Not root-finding. ~2.3 s/solve → offline-only, which
+  is why Powell single-point uses the per-vertex metamodel.
+- Frozen-field advection (all three): one storm-relative field, rigidly translated
+  west at VT; structure doesn't evolve — only translation, scalar KD decay, and
+  per-vertex roughness vary over the passage (the steady-translating-vortex
+  assumption the animation visualizes).
+PDF rebuilt: 25 pp, equations render, citations/cross-refs resolve.
