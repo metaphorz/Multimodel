@@ -364,6 +364,27 @@ accumulates for as long as the wind stays elevated. Section~\ref{sec:metamodel}
 therefore adds a location-level \emph{duration-of-exposure} diagnostic that
 re-exposes the forward-speed and size dependence the peak metric collapses.
 
+\paragraph{Duration-accumulated loss (rate-integrated MDR).}
+As an explicit accumulated-damage alternative to the peak curve, a single-point
+response integrates damage \emph{every timestep} the wind is above the threshold,
+at the instantaneous-MDR rate:
+\[
+\mathrm{MDR}_{\mathrm{acc}}(x)=\min\!\Big(\tfrac1\tau\!\!\int_{V(t)\ge V_0}\!\!\!\!
+\mathrm{MDR}\big(V(t)\big)\,dt,\ \ \mathrm{MDR}_{\max}\Big),\qquad V_0=40\ \text{mph},
+\]
+capped at the curve's plateau $\mathrm{MDR}_{\max}$. The reference exposure time
+$\tau$ is calibrated \emph{per point} so the $100$-vector mean of
+$\mathrm{MDR}_{\mathrm{acc}}$ equals the mean of the peak-based $\%\mathrm{LC}$: the
+metric carries \emph{no net bias} against HAZUS, but \emph{redistributes} loss by
+dwell---slow, large storms that linger accrue more, fast storms less. It is thus a
+duration \emph{sensitivity} rather than a re-levelled loss, and it reduces to the
+HAZUS value for a nominal-duration storm. At an off-track vertex, for example,
+$\mathrm{MDR}_{\mathrm{acc}}$ \emph{falls} as forward speed $V_T$ rises (less dwell),
+the opposite of the peak $\%\mathrm{LC}$ there (which rises with $V_T$ through the
+stronger translation asymmetry)---the two agree only in the mean. Because it needs
+the wind time series, it is a single-point, live-model response
+(Holland/Willoughby); Powell, having no live field, shows a note.
+
 \paragraph{Exposure model (the 4th module).}
 Exposure---\emph{how much insured value sits at each location}---is the fourth
 catastrophe-model leg alongside hazard, vulnerability, and finance, and the sidebar

@@ -953,3 +953,31 @@ models section of docs/FormS6.tex:
   per-vertex roughness vary over the passage (the steady-translating-vortex
   assumption the animation visualizes).
 PDF rebuilt: 25 pp, equations render, citations/cross-refs resolve.
+
+---
+
+# Duration-accumulated loss: rate-integrated MDR (meteorologist item 2, 2026-07-03)
+
+**Ask (revisited):** literally accumulate damage at a point over the time series, not
+just peak. User chose: rate-integrated MDR, rate ∝ instantaneous MDR, self-calibrated.
+
+**Model:** MDR_acc(x) = min( (1/τ)·∫_{V≥40} MDR(V(t)) dt , MDR_max ). τ calibrated
+PER POINT (bisection) so the 100-vector mean of MDR_acc = mean of peak-based %LC —
+no net bias vs HAZUS, a duration REDISTRIBUTION (slow/large storms up, fast down);
+reduces to HAZUS at nominal duration.
+
+### Change (web/analysis.js, web/index.html)
+- `accMDRIntegral(ts)` (∫MDR dt above 40 mph), `mdrCeiling()`, `accCalibration()`
+  (per-point τ via bisection, cached on model|cat|idx|land), `pointSeriesAt()` helper.
+- New Response option `accloss` ("Loss %LC (duration-accumulated)"); `pointResponse`
+  dispatch; `isPointOnlyResp` + metricTxt updated. Single-point, live-model only
+  (Powell shows a note; footprint gated).
+
+### Verified
+- `tests/auto/test_accloss.py`: at off-track (6,33) mean(accloss)=mean(peak %LC)=28.39
+  (τ=3.93) — exact calibration; accloss FALLS with VT (35.7→24.9, more dwell) while
+  peak %LC RISES (28.8→35.4, translation asymmetry) — opposite trends, same mean;
+  Powell accloss unavailable; no console errors. (On-track vertices saturate at the
+  MDR ceiling, so both are flat there — duration matters at moderate points.)
+  Regression: duration/point-response/powell-singlepoint/profiler-cdf all green.
+  Docs: rate-integrated MDR paragraph added to the loss section (PDF 25 pp).

@@ -104,11 +104,61 @@ function ikeMetrics(ts) {
   return { integ: integ / 1e12, peak: peak / 1e12 };  // TJ·h, TJ
 }
 
+// ---- rate-integrated (duration-accumulated) loss --------------------------
+// The HAZUS/ARA MDR curve is single-valued in peak gust, so peak-based %LC ignores
+// how LONG a point stays in damaging wind. This accumulates damage every timestep
+// above the threshold at the instantaneous-MDR rate (the meteorologist's request):
+//   A(x) = ∫_{V≥V0} MDR(V(t)) dt    (MDR·hours)
+//   %LC_acc = 100·min(A/τ, MDR_max)
+// τ is a per-point reference exposure time, calibrated so the 100-storm mean of the
+// accumulated loss equals the mean of the peak-based %LC — no net bias vs HAZUS, a
+// duration REDISTRIBUTION (long-dwell/slow storms up, fast storms down). MDR_max is
+// the curve's plateau (a structure can't exceed full damage).
+function accMDRIntegral(ts) {
+  const dt = PHYS.T_DT;
+  let A = 0;
+  for (const v of ts.w) if (v >= DAMAGE_THRESHOLD_MPH) { const m = mdrAt(v); if (m != null) A += m * dt; }
+  return A;                                 // MDR·hours
+}
+function mdrCeiling() {
+  return state.vuln ? state.vuln.mdr[state.vuln.mdr.length - 1] : 0.6;
+}
+
+// per-point calibration cache for τ (see above). Recomputed when the vertex, model,
+// or land settings change.
+let _accCal = null;
+function accCalibration(model, cat, pt) {
+  const rough = document.getElementById("landRoughness").checked;
+  const decay = document.getElementById("landDecay").checked;
+  const key = [model, cat, pt.idx, "r" + rough, "d" + decay].join("|");
+  if (_accCal && _accCal.key === key) return _accCal;
+  const recs = state.inputs[cat], mdrMax = mdrCeiling();
+  const A = [], peakMDR = [];
+  for (const rec of recs) {
+    const ts = pointSeriesAt(model, rec, pt);
+    A.push(accMDRIntegral(ts));
+    let peak = 0; for (const w of ts.w) if (w > peak) peak = w;
+    peakMDR.push(mdrAt(peak) || 0);
+  }
+  const target = mean(peakMDR);
+  let tau = 1;
+  if (target > 1e-9 && A.some(a => a > 0)) {
+    // meanD(τ) = mean(min(A_i/τ, mdrMax)) is decreasing in τ; bisect (log scale)
+    const meanD = t => mean(A.map(a => Math.min(a / t, mdrMax)));
+    let lo = 1e-6, hi = 1e6;
+    for (let it = 0; it < 60; it++) { const mid = Math.sqrt(lo * hi);
+      if (meanD(mid) > target) lo = mid; else hi = mid; }
+    tau = Math.sqrt(lo * hi);
+  }
+  _accCal = { key, tau, mdrMax };
+  return _accCal;
+}
+
 // these responses live only at single-point scale — the footprint stores hold
 // precomputed peak wind per vertex, with no time series to integrate.
 function isPointOnlyResp() {
   const r = responseVar();
-  return r === "dwell" || r === "dosage" || r === "ike" || r === "ikepeak";
+  return r === "dwell" || r === "dosage" || r === "ike" || r === "ikepeak" || r === "accloss";
 }
 
 // %TLC(i) = TLC(i)/total exposure as percent = 100 * mean MDR over land points
@@ -562,12 +612,18 @@ function drawProfiler() {
 // direct single-point response (no metamodel): peak wind at the picked vertex for an
 // input record, or its MDR (per-point %LC, in %) when the loss response is active.
 // This preserves the true S-shape that a quadratic metamodel would round away.
-function pointResponse(model, rec, pt) {
+// live wind time series at the picked vertex for a record (roughness applied);
+// shared by pointResponse and the accumulated-loss calibration.
+function pointSeriesAt(model, rec, pt) {
   const B = quantileToB(rec.WSP);
   const opts = {};
   if (document.getElementById("landRoughness").checked && state.roughness)
     opts.factor = state.roughness.factors[pt.idx];
-  const ts = pointTimeSeries(model, rec, B, pt.ew, pt.ns, opts);
+  return pointTimeSeries(model, rec, B, pt.ew, pt.ns, opts);
+}
+
+function pointResponse(model, rec, pt) {
+  const ts = pointSeriesAt(model, rec, pt);
   const resp = responseVar();
   if (resp === "dwell" || resp === "dosage") {                 // duration-aware loss proxy
     const d = durationMetrics(ts);
@@ -576,6 +632,11 @@ function pointResponse(model, rec, pt) {
   if (resp === "ike" || resp === "ikepeak") {                  // integrated kinetic energy
     const e = ikeMetrics(ts);
     return resp === "ike" ? e.integ : e.peak;
+  }
+  if (resp === "accloss") {                                    // duration-accumulated %LC
+    const A = accMDRIntegral(ts);
+    const cal = accCalibration(model, currentSelection().cat, pt);
+    return Math.min(A / cal.tau, cal.mdrMax) * 100;
   }
   let peak = 0; for (const w of ts.w) if (w > peak) peak = w;
   if (resp === "tlc") { const m = mdrAt(peak); return m == null ? 0 : m * 100; }
@@ -653,6 +714,7 @@ function buildProfilerDOM() {
     responseVar() === "dosage" ? "wind dosage (mph·h)" :
     responseVar() === "ike" ? "IKE (TJ·h)" :
     responseVar() === "ikepeak" ? "peak IKE (TJ)" :
+    responseVar() === "accloss" ? "%LC accumulated" :
     "peak wind (mph)";
   const view = profilerState.view, scale = profilerState.scale;
   profilerState.pred = profilerPredictor();
