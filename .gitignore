@@ -27,3 +27,6 @@ docs/*.out
 docs/*.fls
 docs/*.fdb_latexmk
 docs/build.log
+
+# Local email correspondence (never commit)
+*.eml
