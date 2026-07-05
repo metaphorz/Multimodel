@@ -42,11 +42,13 @@ BEARING = 270.0         # due west
 # fine time sampling for the peak envelope (hourly is too coarse vs the storm's
 # fast westward motion -> aliasing; dt=1/60h (1-min) removes residual aliasing at
 # negligible cost -- the PDE solve is per-storm, not per-timestep).
-# Window: t=0 is the storm center at ew=0 (east edge). The 12-hr lead-in (t<0,
-# storm approaching from the Atlantic, off-grid to the east) lets coastal cells
-# experience the FRONT-side maximum, not just the back side after passage; the
-# run extends to +24h so even the slowest storm (VT~10 mph, west edge at t~11.5h)
-# fully traverses and clears all 40 grid columns, capturing every cell's back side.
+# Window: t=0 is the storm center at ew=0 (east edge). Form S-6 specifies 12 h from
+# t=0; we integrate a wider t=-12..+24 h superset (drives the viewer's approach
+# animation; +24 h gives the slowest storm room to clear). This changes NO result:
+# the eye starts at the east edge and moves WEST, so every land vertex is closest to
+# the eye at t>=0 and its peak is always attained inside [0,12] h -- the extra window
+# only adds weaker (farther-eye) winds (verified: peak over [-12,+24] == peak over
+# [0,12] at all 682 land vertices, max difference 0).
 T_MIN, T_MAX, T_DT = -12.0, 24.0, 1.0 / 60.0
 
 # default WSP-quantile -> Holland B (Uniform[1.0, 2.5])

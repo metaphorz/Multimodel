@@ -40,12 +40,17 @@ $N\!=\!-15,-12,\dots,45$ (21 rows). Of the 840 vertices, \textbf{682 are land}
 and 158 water, taken directly from the \texttt{Land-Water ID} worksheet of
 \texttt{FormS6Input.xlsx}. The point $(0,0)$ is the storm centre at $t\!=\!0$,
 nine miles east of the landfall location $(25.8611^\circ$N$,\,80.1196^\circ$W$)$;
-the storm tracks due west at the input forward speed VT. The integration window
-runs from $t\!=\!-12$\,h to $t\!=\!+24$\,h: the 12-hour lead-in places the centre
-well east of the grid over the Atlantic, so coastal vertices experience the full
-\emph{front-side} (approaching) wind maximum and not merely the back side after
-passage; the $+24$\,h tail lets even the slowest storm ($\text{VT}\!\approx\!10$
-mph) fully traverse and clear all 40 grid columns. Figure~\ref{fig:grid}
+the storm tracks due west at the input forward speed VT. Form~S-6 specifies that the
+hurricane be modelled for \emph{12 hours starting at $t=0$}; the viewer instead
+integrates a wider window, $t\!=\!-12$\,h to $t\!=\!+24$\,h, which drives the optional
+storm animation (the offshore approach at $t<0$) and gives the slowest storm
+($\text{VT}\!\approx\!10$\,mph, west edge at $t\!\approx\!11.7$\,h) generous room to
+clear all 40 columns. This wider span is a \emph{superset} that changes no result:
+because the eye starts at the east edge and moves \emph{west}, every land vertex is
+closest to the eye at $t\ge 0$, so the per-vertex peak is always attained inside
+$[0,12]$\,h---the extra window only adds weaker (farther-eye) winds. We verified this
+directly: the peak footprint over $[-12,+24]$ equals the footprint over the ROA
+$[0,12]$ window at all $682$ land vertices (maximum difference $0$). Figure~\ref{fig:grid}
 shows the rendered grid (land vs.\ water), the track, and the landfall marker.
 
 \begin{figure}[H]

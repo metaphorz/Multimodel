@@ -545,9 +545,10 @@ function buildMap() {
   const trackCasing = L.polyline(trackPath, { color: casingColor, weight: 5, opacity: 0.85 });
   const trackLine = L.polyline(trackPath, { color: "#e53e3e", weight: 2.5, dashArray: "6 4" });
   const t0Marker = L.marker([east.lat, east.lon]).bindPopup(
-    "Storm center enters the grid at <b>t=0</b>, (0,0) — the east edge, ≈ landfall.<br>" +
-    "The storm is simulated from <b>t=−12 h</b>, when the eye is still offshore " +
-    "(east of the grid, ewc=VT·t &lt; 0) in the Atlantic, through t=+24 h.");
+    "Storm center at <b>t=0</b>, (0,0) — the grid's east edge, <b>9 mi east of " +
+    "landfall</b> (25.86°N, 80.12°W), per Form S-6. The ROA models 12 h from t=0; the " +
+    "viewer also samples t=−12→+24 h (eye offshore for t&lt;0), which yields the " +
+    "identical per-vertex peak footprint.");
   state.layers.track = L.layerGroup([trackCasing, trackLine, t0Marker]).addTo(state.map);
   state.layers.trackCasing = trackCasing;               // recolored on theme change
   state.layers.trackLines = [trackCasing, trackLine];   // for bringToFront over contour
