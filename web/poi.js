@@ -132,15 +132,29 @@ function ensurePoiPanel() {
   return poi.panel;
 }
 
-function poiOpenDetail(idx) {
-  const p = ensurePoiPanel();
+// render the detail body/title for a vertex (no show/front, so it can be reused to
+// refresh in place when a left-side selection changes)
+function renderPoiDetail(p, idx) {
   const pt = state.grid.points[idx];
   p.title.textContent = `POI (${pt.ew},${pt.ns})${pt.place ? " — " + pt.place : ""}`;
   const actions = `<div class="poi-actions"><button class="poi-print">Print / Save PDF</button></div>`;
   p.body.innerHTML = actions + poiDetailHTML(idx);
   p.body.querySelector(".poi-print").addEventListener("click", () => poiPrint(idx));
+}
+
+function poiOpenDetail(idx) {
+  const p = ensurePoiPanel();
+  poi.detailIdx = idx;
+  renderPoiDetail(p, idx);
   p.el.style.display = "flex";
   bringFront(p.el);
+}
+
+// re-render the open POI detail panel under the current selection (it shows loss, so
+// it also tracks the damage/exposure model). Called from updateField().
+function refreshPoiDetail() {
+  if (poi.panel && poi.detailIdx != null && poi.panel.el.style.display !== "none")
+    renderPoiDetail(poi.panel, poi.detailIdx);
 }
 
 // open a clean window with the same detail content and trigger the print dialog

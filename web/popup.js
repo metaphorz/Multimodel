@@ -69,15 +69,28 @@ function windfieldBodyHTML(idx) {
     `marker = vertex at peak time; land effect (${landLabel}) applied to the time series.</p>`;
 }
 
+// (re)render one windfield popup for its stored vertex under the current selection
+function renderWfPanel(panel) {
+  const { model, cat, vIdx } = currentSelection();
+  const pt = state.grid.points[panel.idx];
+  panel.title.textContent =
+    `Windfield — ${model} ${cat.toUpperCase()} v${vIdx + 1} · (${pt.ew},${pt.ns}) mi`;
+  panel.body.innerHTML = windfieldBodyHTML(panel.idx);
+}
+
 function openWindfieldPopup(idx) {
   const p = createWfPanel();
+  p.idx = idx;
   p.el.style.display = "flex";
   bringFront(p.el);
-  const { model, cat, vIdx } = currentSelection();
-  const pt = state.grid.points[idx];
-  p.title.textContent =
-    `Windfield — ${model} ${cat.toUpperCase()} v${vIdx + 1} · (${pt.ew},${pt.ns}) mi`;
-  p.body.innerHTML = windfieldBodyHTML(idx);
+  renderWfPanel(p);
+}
+
+// re-render every open windfield popup so it tracks the left-side selection (model,
+// category, vector, land model, aggregation, …) instead of freezing at open time.
+// Called from updateField() whenever a control changes.
+function refreshWfPanels() {
+  for (const p of wfPanels) if (p.el.style.display !== "none") renderWfPanel(p);
 }
 
 // sample a stored Powell storm-relative field for the per-dot time series

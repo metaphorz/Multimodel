@@ -832,6 +832,11 @@ function updateField() {
   } else {
     info.innerHTML = `${g.n_points} vertices &middot; ${g.n_land} land / ${g.n_water} water`;
   }
+
+  // keep any open left-click windfield popups + the POI detail panel in sync with
+  // the current selection (they otherwise freeze at open time)
+  if (typeof refreshWfPanels === "function") refreshWfPanels();
+  if (typeof refreshPoiDetail === "function") refreshPoiDetail();
 }
 
 // ---- controls ------------------------------------------------------------
