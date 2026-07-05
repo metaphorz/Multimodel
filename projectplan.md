@@ -1004,3 +1004,18 @@ the precomputed footprint within |diff| ≤ 0.05 mph in every combo. Decay bites
 (e.g. (60,0): 93.9→65.6, (90,0): 135→86.8) and single-point tracks the footprint to
 ~0.02 mph. Regression (point-response, powell-singlepoint, duration, accloss,
 profiler-cdf) all green. Docs updated (PDF 25 pp).
+
+---
+
+# Verification sweep + Verification docs section (2026-07-04)
+
+Full sweep of the tests/auto suite (20 Selenium tests). Found + fixed 2 stale tests
+(check_interface: landEffect dropdown -> landRoughness/landDecay checkboxes;
+test_plot_zoom: expand collapsible groups before button clicks) and added
+test_multi_popup (the multiple-windfield-popup feature had no coverage). Result:
+20 passed, 0 failed. Added a "Verification and testing" section to FormS6.tex
+documenting the in-loop testing approach, the suite coverage, the consistency/
+invariant checks (single-point vs footprint ~0.02 mph; anim end == static 682/682;
+per-point AAL sums to domain; accloss mean == peak mean; metamodel parity ~1e-9),
+and the numerical/physics verification (dt convergence, Powell EPR, track contrast,
+node --check). PDF 26 pp.
