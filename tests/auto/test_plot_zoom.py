@@ -84,6 +84,11 @@ def main():
             if not ok:
                 fails.append(f"{label} zoom/pan/reset failed")
 
+        # expand the collapsible Statistics/Actuarial groups so the buttons are clickable
+        d.execute_script("[...document.querySelectorAll('.analysis-group')]"
+                         ".forEach(g=>{ if(!g.classList.contains('open')) g.click(); });")
+        time.sleep(0.2)
+
         check("SRC chart", ".ap-body svg",
               lambda: d.find_element(By.ID, "btnSRC").click())
         check("Profiler cell", ".prof-cell svg",

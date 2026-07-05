@@ -101,11 +101,14 @@ try:
         ".then(g=>g.points[0].place||'').catch(()=>'')") or ""
     # (async; re-read synchronously instead)
 
-    # land-effect selector: none / roughness / kd
+    # land effect is now two checkboxes (landRoughness, landDecay), not a dropdown;
+    # map the old none/roughness/kd labels onto them.
     def set_land(v):
+        rough, decay = v == "roughness", v == "kd"
         drv.execute_script(
-            "const e=document.getElementById('landEffect');e.value=arguments[0];"
-            "e.dispatchEvent(new Event('change'));", v)
+            "const r=document.getElementById('landRoughness'),k=document.getElementById('landDecay');"
+            "r.checked=arguments[0]; r.dispatchEvent(new Event('change'));"
+            "k.checked=arguments[1]; k.dispatchEvent(new Event('change'));", rough, decay)
         time.sleep(0.5)
         return drv.find_element(By.ID, "info").text
     drv.execute_script("document.getElementById('model').value='holland';"
