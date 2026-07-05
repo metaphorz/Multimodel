@@ -235,25 +235,40 @@ function aalColor(frac) {
 
 // ---- per-cell Integrated Kinetic Energy (IKE) field ----------------------
 // Integrated IKE (TJ·h) at every land vertex for ONE input vector (the slider's
-// selected storm), from live per-cell wind time series. Live models only
-// (Holland/Willoughby, decay off), matching the single-point Response. Cached by
-// model|cat|vIdx|rough so unrelated redraws don't recompute the 682 time series.
+// selected storm), with roughness and/or Kaplan–DeMaria decay applied. All three
+// models: Holland/Willoughby build the per-cell time series live (fieldFnFor);
+// Powell samples its stored storm-relative field (powellTimeSeries, as the pop-up
+// does). Returns "field-pending" if Powell's field JSON isn't loaded. Cached by
+// model|cat|vIdx|rough|decay so unrelated redraws don't recompute 682 time series.
 function computePointIKE(model) {
-  if (model === "powell" || document.getElementById("landDecay").checked) return "live-only";
   if (!state.inputs) return null;
   const { cat, vIdx, rec } = currentSelection();
   if (!rec) return null;
   const rough = document.getElementById("landRoughness").checked && !!state.roughness;
-  const key = [model, cat, vIdx, "r" + rough].join("|");
+  const decay = document.getElementById("landDecay").checked;
+  const key = [model, cat, vIdx, "r" + rough, "d" + decay].join("|");
   if (state.ikeCache && state.ikeCache.key === key) return state.ikeCache.field;
-  const B = quantileToB(rec.WSP);
   const pts = state.grid.points, N = pts.length;
   const field = new Float64Array(N);
-  for (let i = 0; i < N; i++) {
-    if (!pts[i].land) continue;
-    const opts = rough ? { factor: state.roughness.factors[i] } : {};
-    const ts = pointTimeSeries(model, rec, B, pts[i].ew, pts[i].ns, opts);
-    field[i] = ikeMetrics(ts).integ;                 // TJ·h
+
+  if (model === "powell") {
+    const Z = state.powellField && state.powellField[cat] && state.powellField[cat][vIdx];
+    if (!Z) return "field-pending";                  // powell_field.json not loaded yet
+    const pf = { Z, n: state.powellField.n, halfKm: state.powellField.halfKm };
+    for (let i = 0; i < N; i++) {
+      if (!pts[i].land) continue;
+      field[i] = ikeMetrics(powellTimeSeries(pf, pts[i], rec, { rough, decay }, i)).integ;
+    }
+  } else {
+    const B = quantileToB(rec.WSP);
+    const sched = decay ? intensitySchedule(stormV0(model, rec, B), rec.VT, pts) : null;
+    for (let i = 0; i < N; i++) {
+      if (!pts[i].land) continue;
+      const opts = {};
+      if (rough) opts.factor = state.roughness.factors[i];
+      if (sched) opts.sched = sched;
+      field[i] = ikeMetrics(pointTimeSeries(model, rec, B, pts[i].ew, pts[i].ns, opts)).integ;
+    }
   }
   state.ikeCache = { key, field };
   return field;
@@ -300,7 +315,7 @@ function renderLegend(mode) {
       ? IKE_STOPS.filter(([f]) => f > 0).map(([f, col]) =>
           `<div class="lg"><span style="background:${col}"></span>&ge; ${fmtTJh(f * mx)}</div>`).join("") +
         `<div class="lg" style="margin-top:3px">max ${fmtTJh(mx)}</div>`
-      : `<div class="lg">IKE — live models only</div>`;
+      : `<div class="lg">IKE — field pending</div>`;
     return;
   }
   if (mode === "landwater") {
@@ -674,12 +689,12 @@ function updateField() {
   if (aal) for (let i = 0; i < aal.length; i++) if (aal[i] > aalMax) aalMax = aal[i];
   state.aalMax = aalMax;
 
-  // per-cell IKE field (integrated TJ·h) for the slider's single storm; "live-only"
-  // when the model/decay can't run a live time series.
+  // per-cell IKE field (integrated TJ·h) for the slider's single storm;
+  // "field-pending" if Powell's stored field JSON isn't loaded.
   const ikeMode = colorBy === "ike";
   let ike = ikeMode ? computePointIKE(model) : null;
-  const ikeLiveOnly = ike === "live-only";
-  if (typeof ike === "string") ike = null;
+  const ikePending = typeof ike === "string";
+  if (ikePending) ike = null;
   let ikeMax = 0;
   if (ike) for (let i = 0; i < ike.length; i++) if (ike[i] > ikeMax) ikeMax = ike[i];
   state.ikeMax = ikeMax;
@@ -790,8 +805,8 @@ function updateField() {
       `${currentSelection().cat.toUpperCase()} · IKE (integrated, 1 storm — vector ${v})` +
       `<br>peak-cell IKE <b>${fmtTJh(state.ikeMax)}</b> over ${n} land pts` +
       `<br><span class="note">∫½ρV² dt above 40 mph · single storm, not a 100-vector mean</span>`;
-  } else if (ikeMode && ikeLiveOnly) {
-    info.textContent = "IKE map needs a live model — switch to Holland/Willoughby and untick Kaplan–DeMaria decay.";
+  } else if (ikeMode && ikePending) {
+    info.textContent = "Powell IKE map — storm-relative field (powell_field.json) not loaded yet.";
   } else if (ikeMode) {
     info.textContent = "IKE needs inputs loaded…";
   } else if (lossMode && wind && state.vuln) {

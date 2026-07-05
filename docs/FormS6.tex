@@ -625,10 +625,14 @@ slice of the $10$--$200$\,TJ whole-storm IKE. As an integrated quantity, $\text{
 {\text{int}}$ behaves like the wind dosage (it falls as forward speed $V_T$ rises and
 grows with intensity), but weights the wind quadratically ($\tfrac12\rho V^2$) with
 physical energy units. A companion map colouring paints every land cell by
-$\text{IKE}_{\text{int}}$ for a \emph{single} chosen storm (682 live time series),
-revealing where the storm deposits the most energy (Figure~\ref{fig:ikemap}); like
-the point responses it needs a live model (Holland/Willoughby, decay off), since it
-integrates a live wind history rather than a stored peak.
+$\text{IKE}_{\text{int}}$ for a \emph{single} chosen storm (682 per-cell time series),
+revealing where the storm deposits the most energy (Figure~\ref{fig:ikemap}), with
+roughness and/or Kaplan--DeMaria decay applied. All three models are supported:
+Holland/Willoughby build the series live, and Powell samples its stored
+storm-relative field (as the left-click pop-up does)---so the map works even though
+Powell has no closed-form field. The single-point IKE \emph{sensitivity} (the
+profiler sweeping arbitrary parameters) remains live-model only, since Powell's
+stored fields exist only at the 100 sampled vectors.
 
 \begin{figure}[H]
 \centering

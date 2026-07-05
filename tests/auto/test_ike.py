@@ -107,16 +107,25 @@ def main():
         if timing[0] > 6000:
             fail.append(f"IKE map compute too slow: {timing[0]:.0f} ms")
 
-        # 5. live-only: Powell -> no IKE field
+        # 5. Powell IKE map now works (samples the stored storm-relative field),
+        # for both marine and with Kaplan-DeMaria decay.
         sel("model", "powell")
         time.sleep(0.5)
         pmax = d.execute_script("return state.ikeMax;")
         pinfo = d.execute_script("return document.getElementById('info').textContent;")
-        print(f"Powell IKE map — ikeMax {pmax}  info {pinfo[:50]!r}")
-        if pmax:
-            fail.append("Powell IKE map should be live-only (ikeMax 0)")
-        if "live model" not in pinfo:
-            fail.append(f"Powell IKE map should show live-only note; got {pinfo[:80]}")
+        print(f"Powell IKE map — ikeMax {pmax}  info {pinfo[:60]!r}")
+        if not (pmax and pmax > 0):
+            fail.append(f"Powell IKE map should now compute (ikeMax > 0), got {pmax}")
+        if "IKE" not in pinfo:
+            fail.append(f"Powell IKE map info should mention IKE; got {pinfo[:80]}")
+        # decay-on Powell also computes
+        d.execute_script("const c=document.getElementById('landDecay');"
+                         "if(!c.checked){c.checked=true;c.dispatchEvent(new Event('change'));}")
+        time.sleep(0.5)
+        pmaxD = d.execute_script("return state.ikeMax;")
+        print(f"Powell IKE map (decay on) — ikeMax {pmaxD}")
+        if not (pmaxD and pmaxD > 0):
+            fail.append(f"Powell IKE map with decay should compute (ikeMax > 0), got {pmaxD}")
 
         errs = [e for e in d.get_log("browser")
                 if e["level"] == "SEVERE" and "favicon.ico" not in e["message"]]
