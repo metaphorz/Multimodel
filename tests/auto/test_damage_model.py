@@ -55,10 +55,12 @@ def main():
         if abs(d.execute_script("return mdrCeiling();") - 1.0) > 1e-9:
             fail.append("logistic mdrCeiling should be 1.0")
 
-        # 3b. parameters are user-selectable: the panel shows only for logistic, and
-        # editing v50/k/vmax changes the curve.
-        shown = d.execute_script("return !document.getElementById('logisticParams').hidden;")
-        if not shown:
+        # 3b. parameters are user-selectable: the panel is VISIBLE (computed display,
+        # not just the hidden attribute) only for logistic, and editing changes the curve.
+        def panel_visible():
+            return d.execute_script("const e=document.getElementById('logisticParams');"
+                                    "return getComputedStyle(e).display!=='none' && e.offsetParent!==null;")
+        if not panel_visible():
             fail.append("logistic parameter panel should be visible when logistic is selected")
         # lower the median v50 148 -> 120: D(120) should jump from ~0.021-ish toward 0.5
         before = d.execute_script("return mdrAt(120);")
@@ -70,10 +72,10 @@ def main():
             fail.append(f"after v50=120, mdr(120) should be ~0.5, got {after:.4f}")
         d.execute_script("const e=document.getElementById('logV50');e.value=148;"
                          "e.dispatchEvent(new Event('input'));"); time.sleep(0.2)
-        # panel hidden under vickery
+        # panel visually HIDDEN under vickery (computed display none / no layout box)
         sel("damageModel", "vickery")
-        if not d.execute_script("return document.getElementById('logisticParams').hidden;"):
-            fail.append("logistic parameter panel should be hidden under Vickery")
+        if panel_visible():
+            fail.append("logistic parameter panel should be HIDDEN under Vickery")
         sel("damageModel", "logistic")
 
         # 4. switching changes the loss map %TLC

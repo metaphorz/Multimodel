@@ -20,6 +20,7 @@ body { display: flex; }
 #bparams { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 #bparams label { font-size: 11px; color: #9fb0c0; flex: 1; min-width: 60px; }
 #logisticParams { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+#logisticParams[hidden] { display: none; }   /* ID rule above would override the UA [hidden] rule */
 #logisticParams label { font-size: 11px; color: #9fb0c0; flex: 1; min-width: 74px;
   display: flex; flex-direction: column; gap: 3px; }
 #logisticParams input { width: 100%; padding: 3px 4px; font-size: 12px;
