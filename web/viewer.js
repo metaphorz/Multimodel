@@ -547,8 +547,9 @@ function buildMap() {
   const t0Marker = L.marker([east.lat, east.lon]).bindPopup(
     "Storm center at <b>t=0</b>, (0,0) — the grid's east edge, <b>9 mi east of " +
     "landfall</b> (25.86°N, 80.12°W), per Form S-6. The ROA models 12 h from t=0; the " +
-    "viewer also samples t=−12→+24 h (eye offshore for t&lt;0), which yields the " +
-    "identical per-vertex peak footprint.");
+    "viewer also samples t=−12→+24 h (eye offshore for t&lt;0). This leaves the marine " +
+    "peak footprint unchanged; with Kaplan–DeMaria decay it also captures the undecayed " +
+    "eyewall at the immediate coast (ew=9), which the strict 12-h window would miss.");
   state.layers.track = L.layerGroup([trackCasing, trackLine, t0Marker]).addTo(state.map);
   state.layers.trackCasing = trackCasing;               // recolored on theme change
   state.layers.trackLines = [trackCasing, trackLine];   // for bringToFront over contour

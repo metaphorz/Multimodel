@@ -45,13 +45,19 @@ hurricane be modelled for \emph{12 hours starting at $t=0$}; the viewer instead
 integrates a wider window, $t\!=\!-12$\,h to $t\!=\!+24$\,h, which drives the optional
 storm animation (the offshore approach at $t<0$) and gives the slowest storm
 ($\text{VT}\!\approx\!10$\,mph, west edge at $t\!\approx\!11.7$\,h) generous room to
-clear all 40 columns. This wider span is a \emph{superset} that changes no result:
-because the eye starts at the east edge and moves \emph{west}, every land vertex is
-closest to the eye at $t\ge 0$, so the per-vertex peak is always attained inside
-$[0,12]$\,h---the extra window only adds weaker (farther-eye) winds. We verified this
-directly: the peak footprint over $[-12,+24]$ equals the footprint over the ROA
-$[0,12]$ window at all $682$ land vertices (maximum difference $0$). Figure~\ref{fig:grid}
-shows the rendered grid (land vs.\ water), the track, and the landfall marker.
+clear all 40 columns. For the \emph{marine} peak field this changes no result---the eye
+starts at the east edge and moves \emph{west}, so every land vertex is closest to the
+eye at $t\ge 0$ and its peak already lies inside $[0,12]$\,h (verified: peak over
+$[-12,+24]$ equals the ROA $[0,12]$ window at all $682$ vertices, and surface roughness,
+a time-independent multiplier, cannot shift the peak time either). With
+\emph{Kaplan--DeMaria decay} on, however, the lead-in \emph{does} matter at the handful
+of immediate-coastal vertices in the landfall column ($\mathrm{ew}=9$): their front-side
+eyewall passes at $t<0$ while the storm is still offshore and \emph{undecayed}
+($s=1$)---stronger than the back-side passage at $t>0$ (already decayed). Under decay
+this raises those $\sim$2 vertices by up to $\sim$9\,mph over the strict $[0,12]$ window,
+a deliberate (and arguably more faithful) deviation---a coastal site feels the full
+eyewall before inland weakening. Figure~\ref{fig:grid} shows the rendered grid (land
+vs.\ water), the track, and the landfall marker.
 
 \begin{figure}[H]
 \centering
