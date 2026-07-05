@@ -19,6 +19,12 @@ body { display: flex; }
 #layers label, #landmodel label { display: block; font-size: 13px; margin: 4px 0; }
 #bparams { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 #bparams label { font-size: 11px; color: #9fb0c0; flex: 1; min-width: 60px; }
+#logisticParams { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+#logisticParams label { font-size: 11px; color: #9fb0c0; flex: 1; min-width: 74px;
+  display: flex; flex-direction: column; gap: 3px; }
+#logisticParams input { width: 100%; padding: 3px 4px; font-size: 12px;
+  background: #0f1620; color: #e6edf3; border: 1px solid #2c3947; border-radius: 4px; }
+#logisticParams .dmg-eq { flex-basis: 100%; font-size: 11px; color: #8fa3b6; margin-top: 2px; }
 #bparams input { width: 100%; padding: 4px; background: #0f1620; color: #e6edf3;
   border: 1px solid #2c3947; border-radius: 4px; }
 #info { font-size: 12px; line-height: 1.5; color: #c5d2de; }

@@ -121,6 +121,7 @@ function accMDRIntegral(ts) {
   return A;                                 // MDR·hours
 }
 function mdrCeiling() {
+  if (typeof damageModelSel === "function" && damageModelSel() === "logistic") return 1.0;
   return state.vuln ? state.vuln.mdr[state.vuln.mdr.length - 1] : 0.6;
 }
 
@@ -130,7 +131,9 @@ let _accCal = null;
 function accCalibration(model, cat, pt) {
   const rough = document.getElementById("landRoughness").checked;
   const decay = document.getElementById("landDecay").checked;
-  const key = [model, cat, pt.idx, "r" + rough, "d" + decay].join("|");
+  const dmg = damageModelSel() === "logistic"
+    ? "logistic:" + Object.values(logisticParams()).join(",") : "vickery";
+  const key = [model, cat, pt.idx, "r" + rough, "d" + decay, dmg].join("|");
   if (_accCal && _accCal.key === key) return _accCal;
   const recs = state.inputs[cat], mdrMax = mdrCeiling();
   const A = [], peakMDR = [];
@@ -397,6 +400,10 @@ function buildMetamodel(model, cat, type) {
   // only; the live RSM fit still yields the input-stat scaffold the point-scale
   // profiler needs (its footprint surface is gated off below, never shown).
   if (isPointOnlyResp()) type = "rsm";
+  // the precomputed GPR/MLP loss metamodels encode the Vickery curve, so under a
+  // non-Vickery damage model the loss response must use the live RSM (which recomputes
+  // %TLC through the current mdrAt); the wind response is damage-model-independent.
+  if (responseVar() === "tlc" && damageModelSel() !== "vickery") type = "rsm";
   if (type === "rsm") {
     const fit = fitRSM(model, cat);
     if (!fit) return null;
@@ -1380,12 +1387,17 @@ function setupAnalysis() {
       g.classList.toggle("open");
       document.getElementById(g.dataset.grp).classList.toggle("open");
     }));
-  // model / land effect / response / exposure change -> invalidate cache + redraw
-  ["model", "landRoughness", "landDecay", "response", "exposureModel"].forEach(id =>
+  // model / land effect / response / exposure / damage-model change -> invalidate + redraw
+  ["model", "landRoughness", "landDecay", "response", "exposureModel", "damageModel"].forEach(id =>
     document.getElementById(id).addEventListener("change", () => {
       analysisState.cache = null;
       redrawOpenPanels();
     }));
+  // logistic damage-model parameters also change the loss surface
+  ["logV50", "logK", "logVmax"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("input", () => { analysisState.cache = null; redrawOpenPanels(); });
+  });
   // metamodel choice drives profiler/compare (and EPR Sobol); no cache invalidation needed
   document.getElementById("metamodel").addEventListener("change",
     () => redrawOpenPanels(["prof", "cmp", "epr"]));

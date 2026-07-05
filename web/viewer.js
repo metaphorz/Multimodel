@@ -128,10 +128,43 @@ function fmtMoney(d) {
 }
 
 // MDR at a wind speed, linear-interpolated from the vulnerability curve
+// active damage model: 'vickery' (HAZUS/ARA curve from vulnerability.json) or
+// 'logistic' (the piecewise logistic below).
+function damageModelSel() {
+  const el = document.getElementById("damageModel");
+  return el ? el.value : "vickery";
+}
+
+// Logistic damage model — masonry, no shutters, gable roof (1995): the open envelope
+// + gable roof let internal pressurization pop the roof early, so damage progresses
+// from a lower median capacity than a sealed "bunker" and saturates to total loss.
+// D(v) = 1/(1+e^{-k(v-v50)}) for v<vmax, else 1.0, in the 3-second gust v (mph).
+// The three parameters are user-selectable (defaults from the reference house).
+const LOGISTIC_DEFAULT = { v50: 148, k: 0.08, vmax: 180 };
+function logisticParams() {
+  const num = (id, def) => { const el = document.getElementById(id);
+    const x = el ? parseFloat(el.value) : NaN; return isFinite(x) ? x : def; };
+  return { v50: num("logV50", LOGISTIC_DEFAULT.v50),
+           k:   num("logK",   LOGISTIC_DEFAULT.k),
+           vmax: num("logVmax", LOGISTIC_DEFAULT.vmax) };
+}
+function logisticMDR(gustMph) {
+  const p = logisticParams();
+  if (gustMph >= p.vmax) return 1.0;
+  return 1 / (1 + Math.exp(-p.k * (gustMph - p.v50)));
+}
+// show the logistic parameter inputs only when that model is selected
+function updateDamageUI() {
+  const box = document.getElementById("logisticParams");
+  if (box) box.hidden = damageModelSel() !== "logistic";
+}
+
 function mdrAt(windMph) {
+  const g = windMph * GUST_FACTOR;               // surface wind -> 3-sec gust
+  if (damageModelSel() === "logistic") return logisticMDR(g);
   const v = state.vuln;
   if (!v) return null;
-  const g = windMph * GUST_FACTOR, xs = v.xs, m = v.mdr;
+  const xs = v.xs, m = v.mdr;
   if (g <= xs[0]) return m[0];
   if (g >= xs[xs.length - 1]) return m[m.length - 1];
   let lo = 0, hi = xs.length - 1;
@@ -786,12 +819,19 @@ function updateField() {
 
 // ---- controls ------------------------------------------------------------
 function wireControls() {
-  ["model", "category", "colorBy", "bdist", "display", "exposureModel"].forEach(id =>
+  ["model", "category", "colorBy", "bdist", "display", "exposureModel", "damageModel"].forEach(id =>
     document.getElementById(id).addEventListener("change", () => {
       if (id === "bdist") bParamInputs(document.getElementById("bdist").value);
       if (id === "model") syncBDistEnabled();
+      if (id === "damageModel") updateDamageUI();
       updateField();
     }));
+  // logistic damage-model parameters (v50, k, vmax) — live-adjustable
+  ["logV50", "logK", "logVmax"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("input", updateField);
+  });
+  updateDamageUI();   // reflect the initial damage-model selection
 
   const vec = document.getElementById("vector");
   vec.addEventListener("input", () => {

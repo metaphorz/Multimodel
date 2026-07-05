@@ -1019,3 +1019,26 @@ invariant checks (single-point vs footprint ~0.02 mph; anim end == static 682/68
 per-point AAL sums to domain; accloss mean == peak mean; metamodel parity ~1e-9),
 and the numerical/physics verification (dt convergence, Powell EPR, track contrast,
 node --check). PDF 26 pp.
+
+---
+
+# Logistic damage model with adjustable parameters (meteorologist, 2026-07-05)
+
+**Ask:** add a second damage model (default stays Vickery) called "Logistic:
+Parameter Selection" with piecewise logistic D(v)=1/(1+e^{-k(v-v50)}) for v<vmax else
+1.0 (v = 3-sec gust). Name implies the parameters are user-selectable -> exposed as
+editable inputs (defaults v50=148, k=0.08, vmax=180 for the no-shutter gable house).
+
+**Change:** #damageModel gained the logistic option + a #logisticParams panel (v50, k,
+vmax inputs, shown only for logistic). viewer.js: damageModelSel(), logisticParams(),
+logisticMDR(), updateDamageUI(); mdrAt() branches on the model. mdrCeiling() -> 1.0
+under logistic. buildMetamodel forces the live RSM for the loss response under a
+non-Vickery model (the precomputed GPR/NN loss metamodels encode Vickery). accloss
+calibration key + both change-listeners include the model + its params.
+
+**Verified:** tests/auto/test_damage_model.py — logistic MDR exact (0.021/0.5/0.723/1/1
+at 100/148/160/180/200); ceiling 1.0; switching changes %TLC (16.9%%->0.49%%);
+single-point %LC uses the model; editing v50 148->120 moves the median (mdr(120)
+0.096->0.5); panel shows only for logistic. Regression: financial/point-ep-aal/
+accloss/exposure/gridpoint-csv/profiler-cdf/point-response/powell-singlepoint green.
+Docs: logistic paragraph in the loss section (PDF 26 pp).

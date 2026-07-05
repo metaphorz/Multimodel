@@ -336,9 +336,29 @@ sigmoid: $\sim$0 below 50\,mph, 50\% near 100\,mph, and a plateau at MDR~$\appro
 0.60$ above $\sim$140\,mph---the masonry ceiling (walls survive; roof, openings,
 and contents bound the loss), in contrast to frame construction which approaches
 1.0. In the sidebar this curve is identified by a \textbf{Damage model} selector
-(\emph{Vickery--ARA (HAZUS)}\cite{hazus,vickery2006}), placed directly under the wind-field selector so
-that alternative vulnerability models can be added alongside it as the framework
-grows.
+(\emph{Vickery--ARA (HAZUS)}\cite{hazus,vickery2006}, the default), placed directly under the wind-field
+selector so that alternative vulnerability models can be added alongside it.
+
+\paragraph{Logistic damage model (adjustable parameters).}
+A second, \emph{parametric} damage model is provided as \textbf{Logistic: Parameter
+Selection}. Rather than the tabulated HAZUS curve it uses a closed-form piecewise
+logistic in the 3-second gust $v$ (mph),
+\[
+D(v)=\begin{cases}\dfrac{1}{1+e^{-k(v-v_{50})}} & v<v_{\max}\\[4pt] 1 & v\ge v_{\max}\end{cases}
+\]
+with three \emph{user-selectable} parameters exposed as inputs when the model is
+chosen: the median capacity $v_{50}$ (the gust at which damage reaches 50\%), the
+steepness $k$, and the total-loss gust $v_{\max}$. The defaults
+($v_{50}=148$\,mph, $k=0.08$, $v_{\max}=180$\,mph) describe the reference
+house---1995 masonry but with \emph{no shutters and a gable roof}: the open envelope
+lets internal pressurization pop the gable roof off its anchors, so damage
+progresses from a lower median than a sealed ``bunker'' and, unlike the masonry
+curve (which plateaus near $0.60$), saturates to \emph{total} loss ($D=1$) by
+$180$\,mph. Switching the damage model---or editing any parameter---re-renders the
+loss map, \%TLC, financial panel, and the single-point loss responses live through
+the same \texttt{mdrAt} used everywhere (the precomputed GPR/NN loss metamodels
+encode the HAZUS curve, so under the logistic model the profiler's loss response
+falls back to the live second-order fit).
 
 \begin{figure}[H]
 \centering
