@@ -233,6 +233,63 @@ and surface roughness (a per-vertex terrain factor fixed in the ground frame). T
 is the standard steady-translating-vortex assumption for wind footprints, and it is
 exactly what the optional storm animation (Figure~\ref{fig:anim}) makes visible.
 
+\subsection{Powell (dynamic): a physical-time simulation}\label{sec:powelldyn}
+The viewer's \textbf{Powell (dynamic)} option drops the frozen-field assumption: the
+same slab boundary-layer momentum equations are integrated onward in \emph{physical}
+time while the forcing evolves during the coastal crossing
+(\texttt{pde\_dynamic\_marine} in the solver; batched precompute
+\texttt{windfield\_dynamic\_batch.py}; forcing updated every $\Delta t=1$\,min).
+Kaplan--DeMaria decay acts through the \emph{pressure} forcing
+($\Delta p(t)=\Delta p_0\,s(t)^2$), so the wind follows the decay target with its
+physical boundary-layer lag ($\tau\!\sim\!1$\,h) instead of instantaneously; the
+Roughness option replaces none of the local exposure conversion but adds the
+\emph{storm-scale} momentum sink: the drag coefficient under each node follows the
+NLCD $z_0$ of the ground the storm is actually over ($C_d$ log-law over land,
+Large--Pond over water), azimuthally asymmetric at landfall.
+
+Long integration required two numerical corrections, applied only in the dynamic
+tendency function (\texttt{physics\_terms\_dyn}; the steady Powell path is
+byte-identical to before): (i) corrected Coriolis signs ($+fv$ radial, $-fu$
+tangential; the flipped signs render a cyclone inertially unstable with a measured
+$\sim$2$\times$10$^3$\,s e-fold, invisible in the 800-iteration steady solve but
+fatal over hours --- effect on the steady product $\le$0.15\,mph), and (ii)
+first-order upwind \emph{radial} advection, which captures the slab boundary-layer
+inflow shock (Smith--Vogl) that blows up centred differences at
+$\sim$8$\times$10$^3$\,s. The dynamic march starts from a spin-up run to true
+convergence and was validated by regression: under constant marine forcing the
+dynamic footprint equals the frozen-field translation \emph{exactly} (0.0\,mph at
+every land vertex).
+
+\paragraph{Baseline and tail behaviour (read before comparing models).}
+Two deliberate differences from the steady Powell product must be understood when
+comparing footprints. \emph{Baseline}: the production steady solve stops at 800
+iterations ($\approx$48\,s of pseudo-time) --- a lightly relaxed initial guess ---
+whereas the dynamic model must start from the true converged equilibrium of the same
+equations, which is systematically stronger (cat3 example: 103.6 vs 96.6\,mph peak;
+mean vertex difference 8.5\,mph). \emph{Tails}: this convergence gap grows with
+storm intensity and tightness, because the unconverged production field is farthest
+from equilibrium for small-$R_{\max}$, deep-$\Delta p$ vortices. Across the 300
+input vectors the per-vector peak median is 138\,mph (dynamic) vs 124\,mph
+(production), but the extreme tail --- vectors drawn near the input-distribution
+edges, e.g.\ $R_{\max}\!\approx\!9$\,mi at $\mathrm{CP}\!\approx\!905$\,mb ---
+reaches 280\,mph dynamic-marine vs 212\,mph production ($\approx$+30\%), and up to
+346\,mph in the dynamic-roughness variants, where the sudden drag increase at
+landfall drives a transient super-gradient boundary-layer jet (a real slab-model
+phenomenon, amplified on already-extreme vectors). These values are faithful
+equilibria of the Powell slab equations under Form S-6's unbounded input sampling,
+not numerical failures. The model contains no thermodynamic ceiling---intensity is
+an \emph{input} (CP, $R_{\max}$, WSP fix a pressure gradient that never weakens over
+water), so over low-drag marine surfaces the boundary layer spins up to whatever
+wind balances that prescribed forcing; nothing like a potential-intensity limit,
+ocean-heat feedback, or eyewall replacement can intervene. The extreme values sit
+far above any observed surface wind and should be read as tail artefacts of the
+input distribution, not as forecasts. The four precomputed products
+(\texttt{powell\_dyn\{,\_kd,\_rough,\_kd\_rough\}.json}) cover the
+decay$\times$roughness checkbox states; Powell (dynamic) provides peak footprints
+only (no storm-relative popup series or animation --- the field is no longer
+translation-invariant), and the steady \textbf{Powell (PDE)} option is retained
+unchanged as the reference.
+
 \section{Land effect: roughness and decay}
 The storm's interaction with the land is modelled by two \emph{independent},
 combinable toggles: \textbf{Surface roughness} and \textbf{Kaplan--DeMaria
@@ -910,8 +967,26 @@ All data artifacts are reproducible via \texttt{pipeline/build\_all.sh}
 marine/K\&D/field precomputes), with \texttt{build\_vulnerability.py} for the
 loss curve, \texttt{windfield\_ua.py} for the faithful Powell EPR, and
 \texttt{precompute\_live.py} for the Holland/Willoughby footprint precomputes
-(driven headlessly so they match the live field code exactly). The app is
-served with \texttt{./start} at \url{http://localhost:8012/web/index.html}.
+(driven headlessly so they match the live field code exactly).
+
+\paragraph{Serving and platform.}
+The viewer is a self-contained client-side application (HTML/CSS/JavaScript with a
+vendored copy of Leaflet under \texttt{web/vendor/}, so no content-delivery network
+is required); its only runtime input is the precomputed JSON under
+\texttt{outputs/web/}. Because the app loads that data with \texttt{fetch()}, which
+browsers forbid under the \texttt{file://} scheme, it must be served over
+\texttt{http://} from a local static server---double-clicking \texttt{index.html}
+directly will not work. On macOS/Linux this is \texttt{./start} (a \texttt{zsh}
+script running Python's \texttt{http.server}); for distribution to a
+\textbf{Windows} machine without Python, \texttt{run.bat} launches an equivalent
+zero-install server (\texttt{serve.ps1}, a PowerShell \texttt{TcpListener} on a
+loopback port needing no administrator rights) and opens the browser. Both serve the
+project root at \url{http://localhost:8012/web/index.html}. A runtime-only zip for
+the Windows path (app, vendored Leaflet, and the \texttt{outputs/web/} data, without
+the build-time virtual environment) is produced by \texttt{make-windows-zip.sh}. The
+map's data layers render offline; only the basemap tiles require a network
+connection.
+
 Figures here are captured by \texttt{docs/capture\_figures.py} (Selenium driving
 headless Chrome against the running viewer); the time-step convergence figure is
 generated by \texttt{docs/make\_dt\_convergence.py}.

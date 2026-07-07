@@ -131,6 +131,7 @@ function animPrecompute() {
     ? sched[Math.max(0, Math.min(schedN, Math.round((t - PHYS.T_MIN) / schedDt)))] : 1;
 
   let fn = null, Z = null, pn = 0, phalf = 0;
+  if (model === "powelldyn") return false;   // peaks-only product; no field to animate
   if (model === "powell") {
     Z = state.powellField && state.powellField[cat] && state.powellField[cat][vIdx];
     if (!Z) return false;

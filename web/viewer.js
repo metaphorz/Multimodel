@@ -251,6 +251,7 @@ function computePointIKE(model) {
   const pts = state.grid.points, N = pts.length;
   const field = new Float64Array(N);
 
+  if (model === "powelldyn") return "field-pending"; // peaks-only product (no stored field)
   if (model === "powell") {
     const Z = state.powellField && state.powellField[cat] && state.powellField[cat][vIdx];
     if (!Z) return "field-pending";                  // powell_field.json not loaded yet
@@ -394,6 +395,17 @@ function applyRoughness(wind) {
 // Holland/Willoughby path remains only for the single-point profiler/popup.
 function computeWindFor(model, cat, vIdx) {
   const { rough, decay } = landState();
+  if (model === "powelldyn") {
+    // dynamic Powell: pick the precomputed product for the checkbox state.
+    // Decay = K&D through the pressure forcing; Roughness = in-PDE storm-scale
+    // z0 drag, on top of which the local exposure factor STILL applies
+    // (complementary layers -- see docs, Dynamic Powell section).
+    const store = decay ? (rough ? state.powellDynKdRough : state.powellDynKd)
+                        : (rough ? state.powellDynRough : state.powellDyn);
+    if (!store || !store[cat]) return "dyn-pending";
+    const wind = store[cat][vIdx];
+    return rough ? applyRoughness(wind) : wind;
+  }
   const marineStore = { powell: state.powell, holland: state.holland, willoughby: state.willoughby }[model];
   const kdStore = { powell: state.powellKd, holland: state.hollandKd, willoughby: state.willoughbyKd }[model];
   const store = decay ? kdStore : marineStore;
@@ -902,7 +914,7 @@ function wireControls() {
 // the WSP->B distribution only feeds the live Holland/Willoughby models; Powell
 // is precomputed and ignores B, so grey the control out when Powell is selected.
 function syncBDistEnabled() {
-  const powell = document.getElementById("model").value === "powell";
+  const powell = ["powell", "powelldyn"].includes(document.getElementById("model").value);
   document.getElementById("bsection").classList.toggle("disabled", powell);
   document.getElementById("bdist").disabled = powell;
   document.querySelectorAll("#bparams input").forEach(i => i.disabled = powell);
@@ -926,6 +938,13 @@ async function init() {
     catch (e) { state.powellField = null; }  // generated after the UA run
     try { state.powellUa = await (await fetch("../outputs/web/powell_ua.json", NC)).json(); }
     catch (e) { state.powellUa = null; }     // faithful EPR (Option 1)
+    // dynamic Powell products (windfield_dynamic_batch.py); optional
+    for (const [k, fn] of [["powellDyn", "powell_dyn"], ["powellDynKd", "powell_dyn_kd"],
+                           ["powellDynRough", "powell_dyn_rough"],
+                           ["powellDynKdRough", "powell_dyn_kd_rough"]]) {
+      try { state[k] = await (await fetch(`../outputs/web/${fn}.json`, NC)).json(); }
+      catch (e) { state[k] = null; }
+    }
     try { state.vuln = await (await fetch("../outputs/web/vulnerability.json", NC)).json(); }
     catch (e) { state.vuln = null; }         // MDR vs wind (loss)
     try { state.metamodels = await (await fetch("../outputs/web/metamodels.json", NC)).json(); }

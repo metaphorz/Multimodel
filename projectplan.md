@@ -1042,3 +1042,191 @@ single-point %LC uses the model; editing v50 148->120 moves the median (mdr(120)
 0.096->0.5); panel shows only for logistic. Regression: financial/point-ep-aal/
 accloss/exposure/gridpoint-csv/profiler-cdf/point-response/powell-singlepoint green.
 Docs: logistic paragraph in the loss section (PDF 26 pp).
+
+## Review — Windows-runnable distribution (2026-07-05)
+Made the app runnable on a stranger's Windows PC from a zip (no Python, no admin).
+- Vendored Leaflet 1.9.4 locally (`web/vendor/leaflet/` js+css+images); dropped the
+  unpkg CDN `<link>`/`<script>` from `web/index.html`. App now has no CDN dependency
+  (only basemap tiles need the network).
+- `serve.ps1`: zero-install PowerShell static server (TcpListener on 127.0.0.1:8012,
+  no admin / no URL-ACL) serving the project root; opens the browser once bound.
+- `run.bat`: double-click launcher that runs `serve.ps1`.
+- `README-Windows.txt`: unzip -> double-click `run.bat`; explains why file:// fails.
+- `make-windows-zip.sh`: builds `outputs/FormS6-viewer-windows.zip` (2.1 MB) with only
+  runtime files (app + vendored Leaflet + `outputs/web/` data), excluding the 1.2 GB
+  venv/pipeline/data/docs.
+- Docs: added "Serving and platform" paragraph to the Interface & reproducibility
+  section of `docs/FormS6.tex` (rebuilt clean). Records macOS `./start` vs Windows
+  `run.bat`/`serve.ps1`, and why a local http server is required.
+- Tested on macOS: vendored Leaflet + all data serve 200 over http; no CDN refs
+  remain; zip contents verified (43 files). NOT testable here: `serve.ps1`/`run.bat`
+  need one real Windows smoke test (a colleague will run it).
+
+# Dynamic time-based Powell simulation (exploration, 2026-07-06)
+
+## Problem
+The Powell windfield is NOT actually simulated in time today. `pipeline/windfield_grid.py`
+runs `pde_steady_marine` once per input vector: it pseudo-time-marches the boundary-layer
+momentum equations (storm-relative polar grid, 200 r x 360 phi) to a STEADY state under
+fixed forcing (Holland pressure gradient from dp/B/Rmax, marine Large & Pond drag,
+translation added as a constant vector at the end). The Delta T = 1 minute is only the
+SAMPLING rate: the frozen field is translated west and sampled; Kaplan-DeMaria decay is a
+post-hoc scalar s(t); roughness a static per-vertex multiplier. Holland/Willoughby are
+parametric shapes and can never vary structurally in time — but the Powell PDE CAN,
+because its steady solver is already a time integrator (Euler steps of the physical
+tendency equations); we simply stop it at equilibrium and freeze the answer.
+
+## What a true dynamic simulation adds
+Integrate the SAME PDE onward in physical time from the marine steady state while the
+forcing evolves as the storm crosses the coast:
+1. Lagged decay — drive K&D decay through the PRESSURE forcing (dp(t) = dp0*s(t)^2 so the
+   equilibrium gradient wind tracks the K&D Vmax target) instead of scaling the wind
+   instantaneously. The boundary layer then spins down with its physical adjustment lag
+   (tau ~ h_bl/(Cd*U) ~ 1 h), giving stronger-than-scalar back-side winds.
+2. Asymmetric land drag — each step, sample land/roughness (NLCD z0, `Cd_from_z0` already
+   exists in the solver) under the storm-relative grid, so drag varies with (r, phi, t).
+   Onshore-flow sectors decelerate while offshore sectors stay marine: a genuine
+   structural asymmetry at landfall that no post-hoc per-vertex multiplier can produce.
+3. The pre-landfall phase is genuinely steady (uniform ocean, constant forcing), so the
+   dynamic window only needs to span coast interaction: t = -2 h .. +14 h.
+
+## Cost (measured today: 3.1 ms/iter on MPS, 2.5 s per 800-iter steady solve)
+The CFL dt is ~0.06 s (limited by the r=0.5 km inner arc length ~8.7 m), so 16 h of
+physical time = ~1M steps = ~50 min/storm — infeasible for 300 storms. Knobs:
+- Raise rmin_km (0.5 -> ~4) and/or drop Nphi (360 -> 180) FOR THE DYNAMIC RUN:
+  dt ~ 1 s -> ~58k steps ~ 2 min/storm -> ~10 h for all 300 (overnight precompute).
+- Phase 0 prototypes on 1-3 storms only, so cost decisions are made with real results.
+
+## Phase 0 — offline prototype (no viewer changes; decision gate)
+- [x] `pde_dynamic_marine()` added to storm-anim/hurricane_pde_marine.py (beside the
+      steady solver; steady path untouched) + `pipeline/windfield_dynamic.py` driver —
+      init from steady spin-up, physical-time march, forcing updated every simulated
+      minute: dp(t) from the SAME K&D schedule (imported from windfield_grid), land
+      drag Cd(r,phi,t) from roughness.json z0 under the moving storm.
+- [x] Validate: with forcing HELD marine-constant, the dynamic run must stay at the
+      steady solution — PASSED EXACTLY: dyn-vs-frozen peak diff 0.0 mph at all land
+      vertices (cat3[0], 15.1 h window, 907 one-minute samples).
+
+### Stability finding (2026-07-06)
+Long integration exposes a latent instability the production steady solve never sees
+(it stops at 800 iters ~ 48 s pseudo-time; a 16 h march = 57,600 s does). Diagnosis
+trail, each hypothesis tested empirically over 16 simulated hours:
+1. NOT the time integrator: SSP-RK3 blows up at t~2364 s, same ~2000 s growth
+   timescale as forward Euler on the fine grid.
+2. NOT azimuthal: the growing mode is exactly axisymmetric (ring asymmetry 0.000),
+   radial, localised near r~28 km (inside the eyewall).
+3. NOT the stretched-grid metric inconsistency (radial derivatives use mean dr on a
+   stretched grid): a uniform radial grid still blows up at t~1743 s.
+4. ROOT CAUSE (hypothesis under test): Coriolis SIGNS in physics_terms are flipped —
+   code has rhs_u ~ -f*v and rhs_v ~ +f*u; cylindrical-coordinate momentum equations
+   require +f*v (radial) and -f*u (tangential). Linear analysis: the sign-flipped
+   system is inertially UNSTABLE for a cyclone (stability product (2v/r - f)(zeta - f)
+   goes negative; growth ~10^3 s, matching observation); the correct-sign system is
+   unconditionally inertially stable there. Invisible at 48 s pseudo-time (drift
+   ~0.3 m/s), fatal over hours. CONFIRMED: fix extends stability 4x (blow-up 1743 s
+   -> 7944 s); effect on the production 800-iter peaks <= 0.15 mph (measured cat1/3/5).
+5. SECOND ROOT CAUSE: the remaining axisymmetric radial runaway (~8000 s, r~18 km,
+   integrator-independent) is the slab-BL INFLOW SHOCK (Smith & Vogl 2008): centered
+   differences blow up on the shock. Fix: first-order UPWIND radial advection.
+   CONFIRMED STABLE: fixed Coriolis + upwind-r holds the full 16 h window, converging
+   to a true steady state (maxU locks at 62.85 m/s, drift 0.000 over 30k+ steps).
+Final dynamic scheme: `physics_terms_dyn` (corrected Coriolis + upwind radial
+advection + optional z0 drag) in storm-anim, used ONLY by pde_dynamic_marine;
+production physics_terms/pde_steady_marine restored byte-identical. Spin-up now runs
+to convergence (early-exit on maxU drift < 0.005 m/s per 1000 iters).
+
+- [x] Run storms: cat3[0] (VT=13.5) done; cat5[13] (slowest, VT=10.1) running.
+- [x] Diagnostics to outputs/dynamic/: peak maps + diff maps (4 variants x
+      frozen/dynamic/diff), wind-vs-time at coast/mid/inland vertices, JSON series.
+- [ ] Review with Paul: is the physical difference big enough to justify Phase 1-2?
+
+### Phase 0 results (cat3[0]; VT=13.5, Rmax=28.9 mi, window -2..13.1 h)
+- A (marine regression): dynamic == frozen exactly (0.0 mph) — solver validated.
+- B (K&D through pressure vs scalar s(t)): land peaks mean +2.6 mph, max +6.5 mph.
+  The BL spins down with its physical lag, so the storm carries wind farther inland;
+  largest effect far-inland/north (ew 60-110). Direction: today's scalar decay
+  UNDERSTATES inland peaks relative to lagged decay.
+- C (in-PDE z0 drag): pure storm-scale drag effect (dynC - dynA on land) is a SMOOTH
+  regional mean -4.4 mph (to -7.9). NOT comparable to the static exposure factor
+  (pointwise -15..-45 mph): in-PDE drag = upstream/storm-scale BL momentum sink; the
+  static log-law factor = local 10 m profile conversion. Complementary layers — a
+  dynamic viewer product would still apply the per-vertex exposure factor on top
+  (double-counting question resolved: they answer different questions).
+- D (both): drag effect under decay -5.3 mph mean; effects roughly additive.
+- The upwind solution develops the physical slab-BL inflow shock (sharp inner-eyewall
+  front) — visible as steps in vertex time series when the shock sweeps past.
+- Cost measured: ~3-4.5 min per variant per storm on MPS (convergent spin-up + march
+  at dt ~1.1 s, Delta T = 1 min forcing updates).
+- Consistency gap (context, NOT dynamics): production 800-iter steady field vs true
+  converged steady state = mean 8.5 / max 12.1 mph at vertices (peaks 96.6 vs 103.6).
+  The production Powell field is a lightly-relaxed initial guess, not the model's
+  equilibrium. Decide in Phase 1 whether production should also run to convergence.
+
+## Phase 1 — full precompute (GO per Paul 2026-07-06; overnight batched run)
+- [x] Batched solver in storm-anim (`pde_dynamic_setup/spinup/march_batch`,
+      `bilinear_polar_batch`, batch-safe `physics_terms_dyn`): 14x throughput
+      (0.13 ms/storm-iter at batch 25 vs 1.82 single). Projection ~2 h for 300 storms.
+- [x] `pipeline/windfield_dynamic_batch.py`: batches of 25 sorted by VT, checkpoint
+      JSON per batch (resume-safe), per-storm NaN guard, assembles 4 products:
+      powell_dyn{,_kd,_rough,_kd_rough}.json (schema = powell.json).
+      Variant A needs no march (Phase 0: dyn==frozen exactly) — frozen translation
+      of the converged marine spin-up. Baseline decision: products use the TRUE
+      converged equilibrium, shipped as a separate "Powell (dynamic)" option;
+      today's powell.json untouched.
+- [x] Validate batch-of-1 vs Phase 0 single-storm output: EXACT (max|d|=0.00 mph on
+      B/C/D window peaks; V0 identical at 103.6 mph).
+- [x] Full run launched 2026-07-06 evening (log: tests/auto/logs/dynamic_batch_full.log,
+      checkpoints: outputs/dynamic/precompute/). ETA ~2-3 h.
+- [x] Full run COMPLETE (3.6 h, 12/12 batches, zero NaN failures). All four
+      powell_dyn*.json complete (100 vectors x 840 vertices per cat), ranges sane.
+- [ ] Review next session: (a) tail behaviour — extreme vectors (Rmax ~9 mi, CP ~905)
+      reach 280 mph dyn-marine vs 212 production (converged-equilibrium amplification
+      of input-distribution tails, ~+30%, consistent with the known baseline gap;
+      median 138 vs 124); rough variants reach 346 mph via the landfall drag-jet
+      transient — decide whether to cap/flag in the viewer; (b) fine-grid accuracy
+      cross-check; (c) then Phase 2 viewer integration.
+- [ ] Phase 0 slow-storm note for review: cat5[13] (VT=10.1, Rmax=10.5 mi): B lag
+      effect is structural, range -18..+5.4 mph (dp-scaling reshapes the vortex, not
+      just its amplitude); C shows a transient landfall drag-jet (peak 177 vs 150
+      marine) — real slab-BL phenomenon, discuss before Phase 2 exposes C/D.
+- [ ] Time-resolved product for popup/animation — decide after peaks land (ground-
+      frame series for all 300 too big; likely showcase vectors only).
+
+## Phase 2 — viewer integration (DONE 2026-07-06/07)
+- [x] "Powell (dynamic)" model option (index.html); computeWindFor picks the product
+      by checkbox state (marine/_kd/_rough/_kd_rough); static exposure factor still
+      applied on top of in-PDE drag (documented). Old "Powell (PDE)" kept unchanged
+      as the reference (per Paul).
+- [x] Graceful degradation: popup + IKE map + animation + analysis panels show
+      peaks-only notes for powelldyn (no storm-relative field exists).
+- [x] Docs: new subsection "Powell (dynamic): a physical-time simulation"
+      (sec:powelldyn) in FormS6.tex — scheme, validation, and FULL tail
+      documentation (median 138 vs 124; extremes 280 vs 212 marine, 346 with the
+      landfall drag-jet; cause and interpretation). PDF rebuilt (27 pp).
+- [x] Selenium smoke test tests/auto/test_powelldyn_option.py: PASS (4 checkbox
+      states render, analysis gate note, no severe console errors).
+- [ ] Later (optional): time-resolved frames for popup/animation for showcase
+      vectors; fine-grid accuracy cross-check.
+
+## Review — Dynamic Powell (Phases 0-2, 2026-07-06/07)
+Dynamic time-based Powell simulation shipped end-to-end in one day: physical-time
+slab-BL solver (corrected Coriolis + upwind radial advection, converged spin-up,
+K&D through pressure, NLCD z0 drag under the moving storm), validated exactly
+against the frozen-field limit; 300-storm batched precompute (3.6 h, 14x batching
+speed-up, zero failures) -> 4 products in outputs/web/; "Powell (dynamic)" wired
+into the viewer with graceful degradation; tails documented in the docs. Files:
+storm-anim/hurricane_pde_marine.py (additive), pipeline/windfield_dynamic{,_batch}.py,
+web/{index.html,viewer.js,popup.js,anim.js,analysis.js}, docs/FormS6.tex.
+
+## Decisions (resolved with Paul, 2026-07-06)
+1. Decay IS Kaplan & DeMaria — same schedule as today, applied through the pressure
+   forcing instead of as an instantaneous wind scalar. Decay and Roughness remain user
+   OPTIONS (same checkboxes as today); both-off = pure marine dynamic run.
+2. Coarsening is SPATIAL only (solver polar grid: rmin 0.5 -> ~4 km, Nphi 360 -> 180);
+   the forcing/sampling Delta T stays 1 minute. The change relaxes the PDE's internal
+   CFL stability step 0.06 s -> ~1 s (cost 50 -> ~2 min/storm). Eyewall resolution
+   (Rmax ~14-50 km) is untouched; only the calm eye center coarsens. Phase 0 verifies
+   coarse-vs-fine agreement on one storm.
+3. Integrator lives with the other solvers: `pde_dynamic_marine()` in storm-anim's
+   hurricane_pde_marine.py beside pde_steady_marine(); pipeline/windfield_dynamic.py is
+   only the thin Form S-6 driver (inputs in, JSON out), mirroring windfield_grid.py.

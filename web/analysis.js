@@ -480,6 +480,12 @@ function openPanel(mode) {
   }
   panels[mode].el.style.display = "flex";
   bringFront(panels[mode].el);
+  if (document.getElementById("model").value === "powelldyn") {
+    panels[mode].body.innerHTML = "<p class='note'>Analysis panels use the steady " +
+      "Powell metamodels / live Holland&ndash;Willoughby fields. Powell (dynamic) is a " +
+      "peaks-only precompute &mdash; switch to Powell (PDE) for analysis.</p>";
+    return;
+  }
   panels[mode].body.innerHTML = "<p class='note'>Computing…</p>";
   setTimeout(() => renderPanel(mode), 20);
 }
