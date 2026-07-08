@@ -1,6 +1,7 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 # Serve the Form S-6 grid viewer on http://localhost:8012/web/
 # (fetch of the JSON data requires http://, not file://.)
+# Works on macOS and Linux.
 cd "$(dirname "$0")"
 PORT=8012
 echo "Serving FormS-6 viewer at http://localhost:${PORT}/web/index.html"
@@ -9,4 +10,11 @@ echo "Stop with ./stop"
 echo $! > tests/auto/server.pid
 sleep 1
 echo "PID $(cat tests/auto/server.pid)"
-open "http://localhost:${PORT}/web/index.html"
+# open the browser with the platform's launcher (macOS: open, Linux: xdg-open)
+if command -v open > /dev/null 2>&1; then
+  open "http://localhost:${PORT}/web/index.html"
+elif command -v xdg-open > /dev/null 2>&1; then
+  xdg-open "http://localhost:${PORT}/web/index.html"
+else
+  echo "Open http://localhost:${PORT}/web/index.html in your browser."
+fi
