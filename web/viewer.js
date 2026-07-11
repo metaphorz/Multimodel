@@ -10,6 +10,7 @@ const state = {
   vuln: null,             // vulnerability curve {xs, mdr} (MDR vs 3-sec gust)
   roughness: null,        // per-point marine->land multiplier
   exposure: null,         // Census exposure per vertex {values, total} (ACS home value)
+  exposureTax: null,      // Tax Roll exposure per vertex {values, total} (FL DOR structure value)
   map: null,
   markers: [],            // circleMarker per grid point, in grid.json order
   wind: null,             // Float array of current per-point wind (mph)
@@ -106,17 +107,28 @@ const GUST_FACTOR = 1.0;         // peak surface wind -> 3-sec gust input (adjus
 
 // ---- exposure model ------------------------------------------------------
 // Uniform: one $100k home at every land vertex. Census: aggregate ACS home value
-// in each vertex's 3-mi cell (state.exposure, from exposure_census.json).
+// in each vertex's 3-mi cell (state.exposure, from exposure_census.json). Tax Roll:
+// FL DOR residential STRUCTURE value (JV - land - special features) in the same cell
+// (state.exposureTax, from exposure_tax.json) — the only model that excludes land,
+// which is what a structural MDR should multiply.
 function exposureMode() {
   const el = document.getElementById("exposureModel");
   return el ? el.value : "uniform";
 }
+function exposureSet() {                              // active per-vertex $ table, or null
+  const m = exposureMode();
+  if (m === "census") return state.exposure;
+  if (m === "tax") return state.exposureTax;
+  return null;
+}
 function exposureAt(i) {                              // $ exposure at land vertex i
-  if (exposureMode() === "census" && state.exposure) return state.exposure.values[i] || 0;
+  const s = exposureSet();
+  if (s) return s.values[i] || 0;
   return state.grid.points[i].land ? EXPOSURE_VALUE : 0;
 }
 function totalExposure() {                            // $ over all land vertices
-  if (exposureMode() === "census" && state.exposure) return state.exposure.total;
+  const s = exposureSet();
+  if (s) return s.total;
   return state.grid.n_land * EXPOSURE_VALUE;
 }
 // adaptive $ formatter — census totals reach billions, uniform stays in millions
@@ -932,6 +944,8 @@ async function init() {
     catch (e) { state.roughness = null; }
     try { state.exposure = await (await fetch("../outputs/web/exposure_census.json", NC)).json(); }
     catch (e) { state.exposure = null; }   // Census exposure (ACS); Uniform works without it
+    try { state.exposureTax = await (await fetch("../outputs/web/exposure_tax.json", NC)).json(); }
+    catch (e) { state.exposureTax = null; }  // Tax Roll exposure (FL DOR structure value)
     try { state.powellKd = await (await fetch("../outputs/web/powell_kd.json", NC)).json(); }
     catch (e) { state.powellKd = null; }   // generated after the UA run
     try { state.powellField = await (await fetch("../outputs/web/powell_field.json", NC)).json(); }

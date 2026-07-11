@@ -8,7 +8,7 @@
 \usepackage[hidelinks]{hyperref}
 \graphicspath{{figures/}}
 
-\title{\textbf{Pro Team Model}\\[2pt]
+\title{\textbf{Pro Team Multimodel}\\[2pt]
 \large Form S-6 Interactive Grid and Wind Fields ---
 Sensitivity, Uncertainty, and Loss over Southern Florida}
 \author{Pro Team and Claude Code}
@@ -17,7 +17,19 @@ Sensitivity, Uncertainty, and Loss over Southern Florida}
 \begin{document}
 \maketitle
 
-\section{Purpose}
+\tableofcontents
+\bigskip
+
+\section{Goal}
+Catastrophe models begin with geographic exposure. This app uses a grid in South
+Florida and a simple horizontal storm track to create a simple experiment. After
+exposure, we get meteorological effects and physics, followed by engineering as
+structural vulnerability. Statistics is used throughout to quantify sensitivity and
+uncertainty. Loss in US Dollars is used to estimate loss costs. Computer Science
+undergirds the development of the app and its verification. The app is termed a
+\textbf{multimodel} because it is a model of models, each of which defines the
+behavior of the whole.
+
 This project implements the grid and wind-field machinery underlying
 \emph{Form S-6 (Hypothetical Events for Sensitivity and Uncertainty Analysis)} of
 the Florida Commission on Hurricane Loss Projection Methodology Report of
@@ -26,14 +38,14 @@ Hurricane Model Output)}. The deliverable is an interactive browser application
 (HTML/CSS/JavaScript + Leaflet) that draws the official $21\times40$ grid over
 southern Florida, runs selectable hurricane wind-field models over it, and
 performs the sensitivity (SRC) and uncertainty (EPR) analyses the ROA prescribes.
-The application is named the \textbf{Pro Team Model} after the five expert
+The application is named the \textbf{Pro Team Multimodel} after the five expert
 disciplines a hurricane-model review draws on---\emph{meteorology} (wind fields),
 \emph{vulnerability} (damage curves), \emph{statistics} (sensitivity and
 uncertainty), \emph{actuarial science} (loss exceedance and financial metrics), and
 \emph{computer science} (the implementation itself)---each of which the tool makes
 swappable or explorable so that visiting modelers can plug in their own components.
 
-\section{The grid and storm track}
+\section{Meteorology: The grid and storm track}
 The grid (ROA Figs.~3--4) has $21\times40=840$ vertices at $\sim$3 statute-mile
 spacing: east--west $E\!=\!0,3,\dots,117$ (40 columns) and north--south
 $N\!=\!-15,-12,\dots,45$ (21 rows). Of the 840 vertices, \textbf{682 are land}
@@ -103,7 +115,7 @@ stepping. The 1-minute step used by the model is fully converged.}
 \label{fig:dtconv}
 \end{figure}
 
-\section{Wind-field models}
+\section{Meteorology: Wind-field models}
 Three wind-field models are provided, each evaluated at all 840 vertices.
 \textbf{Powell} is an iterative boundary-layer PDE (slab) solver;
 \textbf{Holland} is the closed-form gradient-wind profile; \textbf{Willoughby}
@@ -290,7 +302,7 @@ only (no storm-relative popup series or animation --- the field is no longer
 translation-invariant), and the steady \textbf{Powell (PDE)} option is retained
 unchanged as the reference.
 
-\section{Land effect: roughness and decay}
+\section{Meteorology: Land effect---roughness and decay}
 The storm's interaction with the land is modelled by two \emph{independent},
 combinable toggles: \textbf{Surface roughness} and \textbf{Kaplan--DeMaria
 decay}. They are checkboxes rather than a single exclusive selector, so all four
@@ -350,41 +362,7 @@ active the peak wind/loss returns to the coast---e.g.\ at a point $60$\,mi inlan
 over the Everglades the Cat~5 mean peak falls from $\approx\!158$\,mph (marine) to
 $\approx\!78$\,mph---rather than persisting at full marine strength far inland.
 
-\section{Sensitivity and uncertainty analysis}\label{sec:sa}
-Following Iman, Johnson, and Schroeder (2001), as the ROA cites:
-\begin{itemize}
-\item \textbf{Sensitivity (SRC).} Standardized regression coefficients from
-regressing the standardized output on the six standardized inputs over the 100
-SA vectors, per category. Sign gives direction, magnitude gives influence
-(ROA Fig.~9).
-\item \textbf{Uncertainty (EPR).} Expected percentage reduction in output
-variance per input (ROA Fig.~10). For \emph{Powell} the EPR is the variance share
-\[
-\text{EPR}_i=\frac{\mathrm{Var}\!\left(Y\,\middle|\,\text{only }X_i\text{ varies}\right)}
-{\mathrm{Var}(Y_{\text{SA}})}\times100\%,
-\]
-computed faithfully from the six one-variable ROA ``UA for $X$'' worksheets
-(1{,}800 PDE solves); the analytic models use the
-$\text{EPR}_i=\text{SRC}_i^2$ approximation.
-\end{itemize}
-The output metric is the \textbf{mean peak wind over the 682 land vertices}
-(loss-cost is the additional metric in Section~\ref{sec:loss}). The computed
-SRCs and faithful EPRs reproduce the ROA's findings: WSP dominates for
-Category~1 while Rmax grows to dominate for Category~5 (faithful EPR: Cat~1
-WSP~$\approx54\%$, Cat~5 Rmax~$\approx57\%$), with CP negative and CF, FFP, Rmax
-positive (Figure~\ref{fig:analysis}).
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.49\textwidth]{analysis_src.png}\hfill
-\includegraphics[width=0.49\textwidth]{analysis_epr.png}
-\caption{Sensitivity (SRC, left) and uncertainty (EPR, right) for the Powell
-model, plotted by hurricane category---the interactive analogues of ROA
-Figs.~9--10. The windows are independently movable and resizable.}
-\label{fig:analysis}
-\end{figure}
-
-\section{Vulnerability and loss cost}\label{sec:loss}
+\section{Vulnerability: Damage curves}\label{sec:vuln}
 The ROA (p.~186) fixes a single insured structure at \emph{every} one of the 682
 land vertices: a \$100{,}000, zero-deductible, single-family, single-story,
 masonry, gable-roof, no-shutter home with truss anchors, shingles over 15\# felt,
@@ -436,6 +414,7 @@ for the masonry, gable, no-shutter structure, generated from the HAZUS/ARA tool.
 \label{fig:vuln}
 \end{figure}
 
+\section{Actuarial: Loss Cost}\label{sec:loss}
 Per-vertex loss is $\text{loss}=\text{MDR}(\text{peak wind})\times\text{exposure}_{x,y}$;
 the expected loss as a percent of exposure is the total over the 682 land vertices
 divided by the total exposure. The viewer colours the
@@ -491,8 +470,54 @@ Category~5 example shifts from $28.3\%$ (Uniform) to $24.7\%$ (Census), and the
 financial panel's AAL/return-period losses rescale from millions to billions. The
 exposure model feeds the loss totals, the per-point CSV ($\%\text{TLC}$), the
 CDF, and the financial panel consistently; per-point MDR (and hence the map
-colouring) is exposure-independent. (Caveat: ACS market value is owner-occupied
-only and is a proxy for insured replacement cost.)
+colouring) is exposure-independent.
+
+\emph{Tax Roll (FL DOR)} is the third option, and it exists to fix a defect the first
+two share. Loss is $\text{MDR}\times\text{exposure}$, where MDR is a \emph{structural}
+damage ratio; but the ACS question asks what ``this house \emph{and lot}'' would sell
+for, so Census exposure is land-inclusive and land cannot be separated out of it. Wind
+does not damage land. Measured on the Florida Department of Revenue 2025 cadastral, land
+is $41.3\%$ of single-family just value in this domain (and $59.1\%$ in Miami-Dade), so
+a structural MDR applied to house-and-lot value overstates loss---worst on the expensive
+coast, where the wind field is strongest. The error correlates with the hazard.
+
+The roll separates them by statute (s.193.114 F.S.: $JV = LND\_VAL + \text{building} +
+SPEC\_FEAT$), but a naive subtraction fails: county appraisers fold a condominium's land
+into the unit's just value and report $LND\_VAL = 0$ for $99.9\%$ of condo parcels
+($37\%$ of all residential parcels here, \$249B of just value, concentrated in the
+coastal high-rises). We therefore build the basis a catastrophe model actually wants---
+\emph{replacement cost}:
+\[
+\text{exposure(cell)} \;=\; r \times \!\!\sum_{\text{residential parcels}}\!\! \texttt{TOT\_LVG\_AR},
+\qquad
+r \;=\; \operatorname{median}\!\left(\frac{JV - LND\_VAL - SPEC\_FEAT}{\texttt{TOT\_LVG\_AR}}\right)_{\text{single family}}
+\]
+with $r=\$169.96$/sqft calibrated over $962{,}763$ single-family parcels---the clean
+subset where the appraiser does separate land. Land is absent by construction and condos
+and houses sit on one basis. Crucially $r$ is a \emph{single domain-wide constant}: a
+per-county rate would encode land-\emph{allocation policy} rather than construction cost
+(Broward assigns $9.1\%$ of just value to land, Miami-Dade $59.1\%$, at an identical
+median market value of ${\sim}\$280$/sqft), imposing a spurious $2.3\times$ seam along
+the county line that crosses this grid at ${\sim}25.96^\circ$N. Because
+$\%\text{TLC}=\sum \text{MDR}\cdot\text{exposure}/\sum\text{exposure}$, a constant $r$
+cancels exactly: $\%\text{TLC}$, SRC and EPR are invariant to it, and $r$ sets the dollar
+totals only.
+
+Each parcel is assigned to exactly one cell by its \emph{centroid}. The grid steps
+exactly $3$\,mi in $ew$ and $ns$, so the 3-mile cells tile the domain: no parcel is
+double-counted at a boundary, and---unlike tract-density apportionment---no value is
+smeared onto water or the Everglades ($83\%$ of interior Everglades cells are correctly
+empty under Tax Roll, against $232$ cells carrying spurious Census value). The domain
+total is $\$619$B of replacement cost over $1{,}611{,}952$ residential parcels and
+$3.64$B sqft of living area. That it \emph{exceeds} the \$572B Census total despite
+excluding land is itself the second Census defect made visible: B25082 counts
+owner-occupied units only, so it omits renter-occupied housing entirely.
+(Caveats: assessed/taxable value is deliberately \emph{not} used---Save Our Homes caps
+assessed growth at $3\%$/yr, so it diverges from market value; $r$ is calibrated on
+low-rise masonry and applied to high-rise condo floor area, which likely
+\emph{understates} high-rise replacement cost; commercial and vacant parcels are
+excluded. Built offline by \texttt{pipeline/build\_exposure\_tax.py} from the statewide
+cadastral fetched by \texttt{pipeline/fetch\_cadastral.sh}.)
 
 \begin{figure}[H]
 \centering
@@ -503,7 +528,41 @@ loss field as Mean Damage Ratio (right), both as filled contours.}
 \label{fig:kdloss}
 \end{figure}
 
-\section{Metamodels and the interaction profiler}\label{sec:metamodel}
+\section{Statistics: Sensitivity and uncertainty analysis}\label{sec:sa}
+Following Iman, Johnson, and Schroeder (2001), as the ROA cites:
+\begin{itemize}
+\item \textbf{Sensitivity (SRC).} Standardized regression coefficients from
+regressing the standardized output on the six standardized inputs over the 100
+SA vectors, per category. Sign gives direction, magnitude gives influence
+(ROA Fig.~9).
+\item \textbf{Uncertainty (EPR).} Expected percentage reduction in output
+variance per input (ROA Fig.~10). For \emph{Powell} the EPR is the variance share
+\[
+\text{EPR}_i=\frac{\mathrm{Var}\!\left(Y\,\middle|\,\text{only }X_i\text{ varies}\right)}
+{\mathrm{Var}(Y_{\text{SA}})}\times100\%,
+\]
+computed faithfully from the six one-variable ROA ``UA for $X$'' worksheets
+(1{,}800 PDE solves); the analytic models use the
+$\text{EPR}_i=\text{SRC}_i^2$ approximation.
+\end{itemize}
+The output metric is the \textbf{mean peak wind over the 682 land vertices}
+(loss-cost is the additional metric in Section~\ref{sec:loss}). The computed
+SRCs and faithful EPRs reproduce the ROA's findings: WSP dominates for
+Category~1 while Rmax grows to dominate for Category~5 (faithful EPR: Cat~1
+WSP~$\approx54\%$, Cat~5 Rmax~$\approx57\%$), with CP negative and CF, FFP, Rmax
+positive (Figure~\ref{fig:analysis}).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.49\textwidth]{analysis_src.png}\hfill
+\includegraphics[width=0.49\textwidth]{analysis_epr.png}
+\caption{Sensitivity (SRC, left) and uncertainty (EPR, right) for the Powell
+model, plotted by hurricane category---the interactive analogues of ROA
+Figs.~9--10. The windows are independently movable and resizable.}
+\label{fig:analysis}
+\end{figure}
+
+\section{Statistics: Metamodels and the interaction profiler}\label{sec:metamodel}
 The standardized regression coefficients of Section~\ref{sec:sa} treat the
 input--output map as \emph{first order}: each input acts independently and
 linearly. A 2026 review of the Form~S-6 sensitivity procedure (M.~Johnson and
@@ -636,7 +695,7 @@ Damage accumulates for as long as the wind stays above the threshold at which it
 begins ($\sim$40\,mph), so the \emph{peak} wind at a location is an incomplete
 predictor of loss: a slow or large storm holds a point above threshold much longer
 than a fast, compact one of the same peak, yet the peak-driven MDR---and the
-published HAZUS curve (Section~\ref{sec:loss})---score them identically. To make
+published HAZUS curve (Section~\ref{sec:vuln})---score them identically. To make
 this visible at the location level, the Response selector offers two
 duration-of-exposure diagnostics computed by the same direct single-point
 simulation from the per-point wind time series $V(t)$ over the passage,
@@ -844,7 +903,7 @@ dominant parameter varies spatially across the grid.}
 \label{fig:gridsens}
 \end{figure}
 
-\section{Interface and reproducibility}
+\section{Computer science: Interface and reproducibility}
 The viewer offers model / category / input-vector selection (the input vector
 chooses one of the 100 randomized storms for the category), the WSP$\to B$
 distribution control (which now reshapes only the live single-point profiler,
@@ -991,7 +1050,7 @@ Figures here are captured by \texttt{docs/capture\_figures.py} (Selenium driving
 headless Chrome against the running viewer); the time-step convergence figure is
 generated by \texttt{docs/make\_dt\_convergence.py}.
 
-\section{Verification and testing}\label{sec:verification}
+\section{Computer science: Verification and testing}\label{sec:verification}
 Testing is done \emph{in the development loop} rather than as a separate phase: each
 feature is landed together with an automated test that drives the running viewer and
 asserts its behaviour, and the change is committed only once that test---and the

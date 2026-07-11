@@ -1205,8 +1205,16 @@ to convergence (early-exit on maxU drift < 0.005 m/s per 1000 iters).
       landfall drag-jet; cause and interpretation). PDF rebuilt (27 pp).
 - [x] Selenium smoke test tests/auto/test_powelldyn_option.py: PASS (4 checkbox
       states render, analysis gate note, no severe console errors).
-- [ ] Later (optional): time-resolved frames for popup/animation for showcase
-      vectors; fine-grid accuracy cross-check.
+- [DECIDED AGAINST 2026-07-08] time-resolved frames for popup/animation/IKE.
+      Storing per-frame fields for all vectors is a few hundred MB, which forces a
+      lazy load with a multi-second first-Play stall + large RAM footprint. Paul's
+      call: the UI-delay cost outweighs the benefit; Powell (dynamic) stays
+      peak-only (footprint + "Color grid by peak wind"). Play shows "unavailable
+      for this selection"; IKE returns field-pending; popup shows a peaks-only note.
+      If ever revisited, frames would re-enable animation + IKE + popup series
+      together (they all draw from the same time-resolved data).
+- [ ] Later (optional): fine-grid accuracy cross-check (coarse dynamic grid vs
+      fine, corrected physics, one storm to convergence).
 
 ## Review — Dynamic Powell (Phases 0-2, 2026-07-06/07)
 Dynamic time-based Powell simulation shipped end-to-end in one day: physical-time
@@ -1230,3 +1238,101 @@ web/{index.html,viewer.js,popup.js,anim.js,analysis.js}, docs/FormS6.tex.
 3. Integrator lives with the other solvers: `pde_dynamic_marine()` in storm-anim's
    hurricane_pde_marine.py beside pde_steady_marine(); pipeline/windfield_dynamic.py is
    only the thin Form S-6 driver (inputs in, JSON out), mirroring windfield_grid.py.
+
+---
+
+# Tax-Roll Exposure Model (3rd exposure option) — plan (2026-07-09)
+
+## Motivation
+`loss = MDR(peak wind) x exposure`, where MDR is a **structural** damage ratio from a
+masonry vulnerability curve. Both existing exposure models multiply that ratio by
+**land-inclusive** value:
+
+- **Uniform** — $100k/land vertex, a prescribed ROA p.186 constant (not an estimate).
+- **Census** — ACS B25082 "aggregate value of owner-occupied housing units". The ACS
+  question asks what "this house **and lot**" would sell for, so land cannot be removed.
+
+Measured in downtown Miami (FDOR 2025, residential parcels): **land = 69.8% of just
+value, structure = 29.4%**. So the Census model inflates loss ~3.4x there, and worst on
+the expensive coast — i.e. the error correlates with the hazard.
+
+The FL DOR tax roll is the only source that separates them: `JV = LND_VAL + building +
+SPEC_FEAT_`, so **building value = JV - LND_VAL - SPEC_FEAT_**.
+
+## Data source
+- **Values + geometry**: FL Dept. of Revenue 2025 cadastral (NAL roll joined to parcel
+  polygons by the county property appraisers). Statewide zip (2.77 GB):
+  `https://publicfiles.dep.state.fl.us/otis/gis/data/Cadastral_Statewide.zip`
+- Viewer label: **"Tax Roll (FL DOR)"**.
+- Rejected: per-cell ArcGIS REST queries (~13 s/query, 2.5 h) and server-side
+  `groupBy`/`where` (unindexed `CO_NO` full-scans 10.8M rows -> 55 s timeout, masked as
+  HTTP 400). Bulk download is the only workable route.
+
+## Todo
+- [x] Download statewide cadastral zip -> `data/` (gitignored, like `nlcd_grid.tif`)
+- [x] `pipeline/build_exposure_tax.py` -> `outputs/web/exposure_tax.json`
+- [x] Wire "Tax Roll (FL DOR)" into `exposureMode()`/`exposureAt()`/`totalExposure()`
+      in `web/viewer.js` + `<select id="exposureModel">` in `web/index.html`
+- [x] Test in `tests/auto/` (data invariants + Selenium UI)
+- [x] Document in `docs/FormS6.tex` + add `\tableofcontents` (now 29 pages)
+- [x] `make-unix-zip.sh` (macOS/Linux counterpart to `make-windows-zip.sh`)
+
+## Decisions
+- **Residential only** (`DOR_UC` 001-008), matching the masonry residential
+  vulnerability curve and the Census model's owner-occupied basis. Excludes 000 (vacant).
+- **Structure value, not just value** — the reason the model exists.
+- **Centroid assignment**, not envelope-intersect: the 3-mi cells tile the grid
+  (dlat 3.000 mi, dlon 2.989 mi), so a centroid lands in exactly one cell.
+
+## Review (2026-07-09)
+
+### What shipped
+1. **Rename** — "Pro Team Model" -> **"Pro Team Multimodel"** in the 5 places it was the
+   product name (`index.html` title, `web/index.html` title + `<h1>`, `docs/FormS6.tex`
+   `\title` + Purpose). Left alone: "Form S-6" (the regulatory form the software
+   implements, not its name) and "Pro Team & Claude Code" (authorship). PDF rebuilt.
+2. **Tax Roll (FL DOR) exposure** — third option in the Exposure model selector.
+   `pipeline/fetch_cadastral.sh` (2.8 GB statewide zip -> `data/`, gitignored),
+   `pipeline/build_exposure_tax.py` -> `outputs/web/exposure_tax.json` (~25 KB).
+3. **Docs** — `\tableofcontents` added (there was none; now 29 pages), Exposure section
+   rewritten to cover all three models.
+4. **`make-unix-zip.sh`** — macOS/Linux counterpart to the Windows zip.
+
+### Results
+- $170/sqft x 3.64B sqft living area = **$619B** replacement cost, 1,611,952 residential
+  parcels, 266/682 land cells populated.
+- Uniform $68.2M · Census $572B · Tax Roll $619B.
+- Correlation with Census on cells where both are populated: r = 0.83 (same shape,
+  different level -- as expected, since one includes land and the other renters).
+
+### Three findings that changed the design
+1. **Both existing models are land-contaminated and cannot be fixed from their own data.**
+   ACS B25082 asks what "this house *and lot*" would sell for. Land is 41.3% of
+   single-family just value here, 59.1% in Miami-Dade. A structural MDR times
+   house-and-lot value overstates loss most on the expensive coast -- i.e. the error
+   correlates with the hazard.
+2. **"JV - LND_VAL" is NOT structure value.** Appraisers fold a condo's land into the
+   unit's just value: `LND_VAL = 0` for 99.9% of condos, 85.8% of co-ops -- 37% of
+   parcels, $249B, concentrated in coastal high-rises. The naive subtraction removes
+   nothing there. Hence replacement cost (living area x $/sqft) instead.
+3. **A per-cell/per-county $/sqft rate encodes assessment policy, not construction cost.**
+   Broward and Miami-Dade single-family homes have the same median market value per sqft
+   ($276 vs $286), same size (1857 vs 1839 sqft), similar vintage -- yet Broward assigns
+   9.1% of just value to land and Miami-Dade 59.1%. Per-county rates would be $247 vs
+   $109/sqft: a 2.3x cliff along the county line that crosses this grid at ~25.96N.
+   Rejected in favour of one domain-wide rate. Since
+   %TLC = SUM(MDR x exposure)/SUM(exposure), a constant rate cancels exactly -- %TLC, SRC
+   and EPR are invariant to it (verified in the Selenium test to 9 dp). It sets the
+   dollar totals only; the exposure *shape* is residential floor area per cell.
+
+### Notes for later
+- **`python` is aliased to `/opt/homebrew/bin/python3`**, which shadows the venv even
+  after `source venv/bin/activate`. Always call `venv/bin/python` explicitly.
+- `requirements.txt` pinned geopandas/pyproj but they were not installed in the venv;
+  `pipeline/build_exposure.py` would not have run either. Installed.
+- The FDOR ArcGIS FeatureServer is unusable for this: spatial queries ~13 s each, and any
+  `where` on the unindexed `CO_NO` full-scans 10.8M rows and dies at ~55 s (returned as a
+  masked HTTP 400). Bulk download is the only workable route.
+- `pyogrio.read_dataframe(where="DOR_UC IN (...)")` silently returns **0 rows** if
+  `DOR_UC` is not also listed in `columns`. Cost an hour of false debugging.
+- Peak disk during a rebuild is ~12.6 GB (`data/`), all gitignored and deletable.

@@ -6,6 +6,10 @@ __pycache__/
 # Large regenerable data (rebuild via pipeline/fetch_nlcd.sh)
 data/nlcd_grid.tif
 
+# Large regenerable data (rebuild via pipeline/fetch_cadastral.sh)
+data/Cadastral_Statewide.zip
+data/cadastral/
+
 # Test/server artifacts
 tests/auto/*.png
 tests/auto/server.log
