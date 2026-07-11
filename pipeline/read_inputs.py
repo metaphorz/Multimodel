@@ -22,7 +22,7 @@ from openpyxl import load_workbook
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-XLSX = os.path.join(ROOT, "FormS6Input.xlsx")
+XLSX = os.path.join(ROOT, "inputs", "FormS6Input.xlsx")
 OUT = os.path.join(ROOT, "outputs", "web", "inputs.json")
 
 VARS = ["CP", "Rmax", "VT", "WSP", "CF", "FFP", "Quantile"]

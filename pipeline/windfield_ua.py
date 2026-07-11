@@ -22,7 +22,7 @@ sys.path.insert(0, HERE)
 import windfield_grid as W  # reuses make_args/peak_winds/constants + torch device
 
 ROOT = os.path.dirname(HERE)
-XLSX = os.path.join(ROOT, "FormS6Input.xlsx")
+XLSX = os.path.join(ROOT, "inputs", "FormS6Input.xlsx")
 OUT = os.path.join(ROOT, "outputs", "web", "powell_ua.json")
 
 # UA worksheet name -> short key
