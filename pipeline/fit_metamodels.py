@@ -31,12 +31,24 @@ VARS = ["CP", "Rmax", "VT", "WSP", "CF", "FFP"]
 CATS = ["cat1", "cat3", "cat5"]
 RESPONSES = ["wind", "tlc"]
 SEED = 0
+# Sobol' Monte-Carlo budget. n=2048 (the original) left the indices drifting by
+# ~0.05 -- as large as the interaction effect itself. Converged to <0.01 here.
+N_SOBOL = 262144
+REPS = 3
+# second-order indices need d + C(d,2) + 2 = 23 evaluations per sample, so they run
+# at a smaller n to keep the build quick; the pairwise signal is ~10x its noise.
+N_SOBOL2 = 131072
+REPS2 = 2
 
 
 # ---- reproduce the viewer's default-config output metric in Python --------
 def load_data():
     grid = json.loads((WEB / "grid.json").read_text())
     powell = json.loads((WEB / "powell.json").read_text())
+    # Kaplan-DeMaria-decayed Powell footprint, same (100 vectors x 840 vertices) shape.
+    # Fitting an emulator on this too is what lets the Sobol' indices follow the decay
+    # toggle instead of being pinned to the no-decay configuration.
+    powell_kd = json.loads((WEB / "powell_kd.json").read_text())
     rough = json.loads((WEB / "roughness.json").read_text())
     vuln = json.loads((WEB / "vulnerability.json").read_text())
     inputs = json.loads((WEB / "inputs.json").read_text())
@@ -44,7 +56,7 @@ def load_data():
     factors = np.array(rough["factors"], dtype=float)        # marine->land per vertex
     xs = np.array(vuln["xs"], dtype=float)
     mdr = np.array(vuln["mdr"], dtype=float)
-    return grid, powell, factors, land, xs, mdr, inputs
+    return grid, powell, powell_kd, factors, land, xs, mdr, inputs
 
 
 def mdr_at(wind, xs, mdr):
@@ -116,8 +128,14 @@ def mlp_predict_z(params, Xz):
 
 
 # ---- Sobol first-order + total indices (Saltelli/Jansen) on the GPR -------
-def sobol_indices(predict_fn, lo, hi, n=2048):
-    rng = np.random.default_rng(SEED)
+# Variance-based SA per Sobol' (2001); estimators and the emulator-based approach
+# follow Francom & Nachtsheim (2025), arXiv:2506.11471. Sobol' requires
+# INDEPENDENT inputs and an explicit input distribution. Both hold here: the six
+# Form S-6 inputs are near-uncorrelated (see input_correlation below) and their
+# marginals are uniform over the sampled range (KS test, see check_uniform), so
+# drawing A/B uniformly on the observed box is the correct reference measure.
+def sobol_indices(predict_fn, lo, hi, n=2048, seed=SEED):
+    rng = np.random.default_rng(seed)
     d = len(lo)
     A = lo + (hi - lo) * rng.random((n, d))
     B = lo + (hi - lo) * rng.random((n, d))
@@ -129,7 +147,64 @@ def sobol_indices(predict_fn, lo, hi, n=2048):
         fABi = predict_fn(ABi)
         S1[i] = np.mean(fB * (fABi - fA)) / var                       # Saltelli 2010
         ST[i] = 0.5 * np.mean((fA - fABi) ** 2) / var                 # Jansen 1999
-    return np.clip(S1, 0, 1).tolist(), np.clip(ST, 0, 1).tolist()
+    return np.clip(S1, 0, 1), np.clip(ST, 0, 1)
+
+
+def sobol_estimate(predict_fn, lo, hi, n=N_SOBOL, reps=REPS):
+    """Average the indices over independent replicates and report the MC error.
+
+    The Saltelli S1 estimator is high-variance here (one input carries ~70% of the
+    output variance), and at the original n=2048 its Monte-Carlo noise (~0.05) was
+    the SAME size as the ST-S1 interaction signal it was meant to reveal. Replicates
+    give an honest standard error, so an interaction can be called real only when it
+    clears its own error bar. Returns (S1, ST, se_S1, se_ST).
+    """
+    runs = [sobol_indices(predict_fn, lo, hi, n=n, seed=SEED + k) for k in range(reps)]
+    S1 = np.mean([r[0] for r in runs], axis=0)
+    ST = np.mean([r[1] for r in runs], axis=0)
+    se_S1 = np.std([r[0] for r in runs], axis=0, ddof=1) / np.sqrt(reps)
+    se_ST = np.std([r[1] for r in runs], axis=0, ddof=1) / np.sqrt(reps)
+    return S1, ST, se_S1, se_ST
+
+
+def sobol_second_order(predict_fn, lo, hi, n=N_SOBOL2, reps=REPS2):
+    """Pure two-way indices S_ij, as a symmetric matrix (diagonal zero).
+
+    S_ij = S^closed_ij - S_i - S_j: the share of output variance carried by the
+    i-j pair *jointly*, over and above their two main effects. This is the exact
+    quantity the interaction matrix asks for by eye -- a cell whose red/max and
+    blue/min curves diverge is a cell with large S_ij.
+    """
+    d = len(lo)
+    mats = []
+    for rep in range(reps):
+        rng = np.random.default_rng(SEED + 100 + rep)
+        A = lo + (hi - lo) * rng.random((n, d))
+        B = lo + (hi - lo) * rng.random((n, d))
+        fA, fB = predict_fn(A), predict_fn(B)
+        var = np.var(np.concatenate([fA, fB])) or 1e-12
+        Sc = np.zeros(d)                                  # closed first-order
+        for i in range(d):
+            ABi = A.copy(); ABi[:, i] = B[:, i]
+            Sc[i] = np.mean(fB * (predict_fn(ABi) - fA)) / var
+        M = np.zeros((d, d))
+        for i in range(d):
+            for j in range(i + 1, d):
+                ABij = A.copy(); ABij[:, [i, j]] = B[:, [i, j]]
+                closed = np.mean(fB * (predict_fn(ABij) - fA)) / var
+                M[i, j] = M[j, i] = closed - Sc[i] - Sc[j]
+        mats.append(M)
+    return np.mean(mats, axis=0)
+
+
+def input_correlation(X):
+    """Max |off-diagonal| Pearson r among inputs. Sobol' assumes independence."""
+    C = np.corrcoef(X.T)
+    off = C[~np.eye(C.shape[0], dtype=bool)]
+    k = int(np.argmax(np.abs(off)))
+    iu = np.triu_indices(C.shape[0], 1)
+    pair = max(zip(*iu), key=lambda ij: abs(C[ij]))
+    return float(np.abs(off).max()), f"{VARS[pair[0]]}~{VARS[pair[1]]}"
 
 
 def cv_r2(estimator, X, y):
@@ -143,11 +218,44 @@ def r2(y, yhat):
     return float(1 - ss_res / ss_tot)
 
 
+def sobol_block(field, factors, land, xs, mdr, inputs, cat, response):
+    """Fit a GPR to one land configuration and return its Sobol' block.
+
+    Called once per land configuration so the indices track the viewer's Kaplan-
+    DeMaria toggle. The GPR here is a throwaway emulator used only for the variance
+    decomposition -- the exported predictor is still the roughness-only one.
+    """
+    X = np.array([[r[v] for v in VARS] for r in inputs[cat]], dtype=float)
+    y = metric_columns(field, factors, land, xs, mdr, cat, response)
+    m, s = X.mean(0), X.std(0)
+    s[s == 0] = 1.0
+    _, gp = fit_gpr((X - m) / s, y)
+    emu = lambda Q: gpr_predict(gp, (Q - m) / s)                      # noqa: E731
+    lo, hi = X.min(0), X.max(0)
+    S1, ST, se_S1, se_ST = sobol_estimate(emu, lo, hi)
+    S2 = sobol_second_order(emu, lo, hi)
+    inter = ST - S1
+    se_int = np.sqrt(se_S1 ** 2 + se_ST ** 2)
+    max_r, max_r_pair = input_correlation(X)
+    return {
+        "S1": S1.tolist(), "ST": ST.tolist(),
+        "se_S1": se_S1.tolist(), "se_ST": se_ST.tolist(),
+        "interaction": inter.tolist(),
+        "resolved": (inter > 2 * se_int).tolist(),
+        "sum_S1": float(np.sum(S1)),
+        "S2": S2.tolist(),
+        "n": N_SOBOL, "reps": REPS,
+        "max_input_corr": max_r, "max_input_corr_pair": max_r_pair,
+    }
+
+
 def main():
-    grid, powell, factors, land, xs, mdr, inputs = load_data()
+    grid, powell, powell_kd, factors, land, xs, mdr, inputs = load_data()
     out = {"config": {"model": "powell", "land": "roughness"},
-           "vars": VARS, "note": "Option A: GPR/NN fit for the default config only; "
-           "Linear/RSM stays live in the browser.",
+           "vars": VARS, "note": "GPR/NN predictors are fit for the default config "
+           "(Powell + roughness); Linear/RSM stays live in the browser. Sobol' indices "
+           "are fit for BOTH land configs (sobol = roughness, sobol_kd = roughness + "
+           "Kaplan-DeMaria decay) so they follow the viewer's decay toggle.",
            "responses": {}}
     max_gpr_err = max_mlp_err = 0.0
 
@@ -175,9 +283,17 @@ def main():
             inv = 1.0 / np.asarray(gp["length_scale"])
             ard = (inv / inv.sum()).tolist()
 
-            # Sobol on the (cheap) GPR predictor over observed input ranges
-            S1, ST = sobol_indices(lambda Q: gpr_predict(gp, (Q - xs_mean) / xs_std),
-                                   X.min(0), X.max(0))
+            # Sobol' for BOTH land configurations, so the viewer's Kaplan-DeMaria
+            # toggle selects the matching set instead of hiding the indices entirely.
+            sob = sobol_block(powell, factors, land, xs, mdr, inputs, cat, response)
+            sob_kd = sobol_block(powell_kd, factors, land, xs, mdr, inputs, cat, response)
+            S1 = np.array(sob["S1"]); ST = np.array(sob["ST"])
+            interaction = np.array(sob["interaction"])
+            resolved = np.array(sob["resolved"])
+            sum_S1 = sob["sum_S1"]
+            se_int = np.sqrt(np.array(sob["se_S1"]) ** 2 + np.array(sob["se_ST"]) ** 2)
+            S2 = np.array(sob["S2"])
+            max_r, max_r_pair = sob["max_input_corr"], sob["max_input_corr_pair"]
 
             # MLP
             mlp, mp = fit_mlp(Xz, yz)
@@ -198,11 +314,26 @@ def main():
                 "gpr": {**gp, "r2": r2(y, gpr_yhat), "cv_r2": gp_cv, "ard": ard},
                 "mlp": {**mp, "y_mean": y_mean, "y_std": y_std,
                         "r2": r2(y, mlp_yhat), "cv_r2": mp_cv},
-                "sobol": {"S1": S1, "ST": ST},
+                "sobol": sob,          # Powell + surface roughness
+                "sobol_kd": sob_kd,    # Powell + surface roughness + K-D decay
             }
+            hits = [VARS[i] for i in range(len(VARS)) if resolved[i]]
             print(f"  {response:4s} {cat}: GPR R²={r2(y, gpr_yhat):.3f} cv={gp_cv:.3f} | "
                   f"MLP R²={r2(y, mlp_yhat):.3f} cv={mp_cv:.3f} | "
-                  f"ARD top={VARS[int(np.argmax(ard))]} Sobol ST top={VARS[int(np.argmax(ST))]}")
+                  f"ARD top={VARS[int(np.argmax(ard))]}")
+            print(f"        Sobol: ST top={VARS[int(np.argmax(ST))]} "
+                  f"sum(S1)={sum_S1:.3f} -> interaction={1 - sum_S1:+.3f} | "
+                  f"max(ST-S1)={interaction.max():.3f}±{se_int.max():.3f} "
+                  f"@ {VARS[int(np.argmax(interaction))]} | "
+                  f"resolved interactions: {', '.join(hits) if hits else 'none'} | "
+                  f"max|r|={max_r:.3f} ({max_r_pair})")
+            iu = np.triu_indices(len(VARS), 1)
+            for tag, b in (("roughness", sob), ("rough+K-D ", sob_kd)):
+                M = np.array(b["S2"])
+                k = int(np.argmax(np.abs(M[iu])))
+                bi, bj = iu[0][k], iu[1][k]
+                print(f"        Sobol[{tag}]: sum(S1)={b['sum_S1']:.3f} "
+                      f"top pair {VARS[bi]}x{VARS[bj]} S_ij={M[bi, bj]:+.4f}")
 
     (WEB / "metamodels.json").write_text(json.dumps(out))
     size = (WEB / "metamodels.json").stat().st_size / 1024

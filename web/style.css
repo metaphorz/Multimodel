@@ -133,6 +133,20 @@ body.theme-light .vec-row .vc .v { color: #1c2530; }
 .legend2 .lgi { display: flex; align-items: center; font-size: 11px; color: #334155; }
 .legend2 .lgi span { width: 12px; height: 12px; border-radius: 2px; margin-right: 4px; }
 
+/* Sobol' overlay status in the profiler / interaction matrix */
+.sobol-on  { background: #eff6ff; border-left: 3px solid #2563eb; padding: 5px 7px;
+             border-radius: 3px; }
+.sobol-off { background: #fef3c7; border-left: 3px solid #d97706; padding: 5px 7px;
+             border-radius: 3px; }
+
+/* sensitivity method switch: SRC (regression) vs Sobol' (variance-based) */
+.sa-tabs { display: flex; gap: 6px; margin-bottom: 8px; }
+.sa-tab { flex: 1; padding: 5px 8px; font-size: 12px; cursor: pointer;
+          border: 1px solid #cbd5e1; background: #f1f5f9; color: #334155;
+          border-radius: 4px; }
+.sa-tab:hover { background: #e2e8f0; }
+.sa-tab.on { background: #2563eb; border-color: #2563eb; color: #fff; }
+
 /* interaction profiler panel */
 .prof-toggle { display: flex; gap: 6px; margin-bottom: 8px; }
 .prof-tab { flex: 1; padding: 5px; cursor: pointer; font-size: 12px;

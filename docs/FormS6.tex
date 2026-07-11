@@ -6,10 +6,34 @@
 \usepackage{amsmath}
 \usepackage{xcolor}
 \usepackage[hidelinks]{hyperref}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric,arrows.meta,positioning,calc}
 \graphicspath{{figures/}}
 
+% ---- shared flowchart / UML activity-diagram styles ----
+\tikzset{
+  dfbox/.style   ={rectangle, rounded corners=3pt, draw=black!65, thick,
+                   fill=blue!8, minimum height=14mm, text width=22mm,
+                   align=center, font=\small},
+  dfsrc/.style   ={dfbox, fill=black!8},
+  umlact/.style  ={rectangle, rounded corners=5pt, draw=black!65, thick,
+                   fill=blue!8, minimum height=9mm, text width=34mm,
+                   align=center, font=\scriptsize, inner sep=2pt},
+  umlalt/.style  ={umlact, fill=green!8, text width=26mm},
+  umldec/.style  ={diamond, draw=black!65, thick, fill=orange!12, aspect=2.2,
+                   inner sep=1pt, align=center, font=\scriptsize},
+  umlmerge/.style={diamond, draw=black!65, thick, fill=black!5, aspect=1,
+                   minimum size=5mm, inner sep=0pt},
+  umlinit/.style ={circle, fill=black, minimum size=4mm, inner sep=0pt},
+  umlfinal/.style={circle, draw=black, very thick, minimum size=5mm, inner sep=0pt,
+                   path picture={\fill (path picture bounding box.center)
+                   circle (1.4mm);}},
+  flow/.style    ={-{Stealth[length=2mm,width=1.6mm]}, thick, draw=black!70},
+  guard/.style   ={font=\tiny, inner sep=1.5pt, fill=white}
+}
+
 \title{\textbf{Pro Team Multimodel}\\[2pt]
-\large Form S-6 Interactive Grid and Wind Fields ---
+\large Interactive Grid and Wind Fields ---
 Sensitivity, Uncertainty, and Loss over Southern Florida}
 \author{Pro Team and Claude Code}
 \date{\today}
@@ -33,7 +57,7 @@ behavior of the whole.
 This project implements the grid and wind-field machinery underlying
 \emph{Form S-6 (Hypothetical Events for Sensitivity and Uncertainty Analysis)} of
 the Florida Commission on Hurricane Loss Projection Methodology Report of
-Activities (ROA), which supports \emph{Standard S-3 (Uncertainty Analysis for
+Activities (ROA)~\cite{fchlpm}, which supports \emph{Standard S-3 (Uncertainty Analysis for
 Hurricane Model Output)}. The deliverable is an interactive browser application
 (HTML/CSS/JavaScript + Leaflet) that draws the official $21\times40$ grid over
 southern Florida, runs selectable hurricane wind-field models over it, and
@@ -44,6 +68,10 @@ disciplines a hurricane-model review draws on---\emph{meteorology} (wind fields)
 uncertainty), \emph{actuarial science} (loss exceedance and financial metrics), and
 \emph{computer science} (the implementation itself)---each of which the tool makes
 swappable or explorable so that visiting modelers can plug in their own components.
+
+The processes, methods, and data for this app are all public domain and open in the
+repository. The Pro Team provides this repository using the MIT License, which asserts
+no warranties. There may be inconsistencies or errors.
 
 \section{Meteorology: The grid and storm track}
 The grid (ROA Figs.~3--4) has $21\times40=840$ vertices at $\sim$3 statute-mile
@@ -266,7 +294,7 @@ tangential; the flipped signs render a cyclone inertially unstable with a measur
 $\sim$2$\times$10$^3$\,s e-fold, invisible in the 800-iteration steady solve but
 fatal over hours --- effect on the steady product $\le$0.15\,mph), and (ii)
 first-order upwind \emph{radial} advection, which captures the slab boundary-layer
-inflow shock (Smith--Vogl) that blows up centred differences at
+inflow shock (Smith and Vogl 2008)~\cite{smithvogl} that blows up centred differences at
 $\sim$8$\times$10$^3$\,s. The dynamic march starts from a spin-up run to true
 convergence and was validated by regression: under constant marine forcing the
 dynamic footprint equals the frozen-field translation \emph{exactly} (0.0\,mph at
@@ -305,7 +333,7 @@ unchanged as the reference.
 \section{Meteorology: Land effect---roughness and decay}
 The storm's interaction with the land is modelled by two \emph{independent},
 combinable toggles: \textbf{Surface roughness} and \textbf{Kaplan--DeMaria
-decay}. They are checkboxes rather than a single exclusive selector, so all four
+decay}~\cite{kaplan}. They are checkboxes rather than a single exclusive selector, so all four
 states are reachable: neither (pure marine winds), either alone, or both
 together. The default is \textbf{both on}: a spatial terrain-friction effect plus
 a temporal inland-filling effect, which together give the most physically
@@ -314,10 +342,11 @@ realistic field (see below).
 \paragraph{Surface roughness.}
 Roughness is applied as a per-vertex, wind-speed-independent multiplier on the
 final surface wind. The roughness length $z_0$ at each vertex is derived from
-\textbf{NLCD~2021 land cover} (fetched as a properly georeferenced GeoTIFF from
-the MRLC WCS) via a published land-cover$\to z_0$ table, then converted from
+\textbf{NLCD~2021 land cover}~\cite{nlcd} (fetched as a properly georeferenced GeoTIFF from
+the MRLC WCS) via a published land-cover$\to z_0$ table~\cite{aersurface}, then converted from
 marine to terrain exposure with the gradient-tied \textbf{log-law}
-(Vickery et al.\ 2009 / ESDU):
+(Vickery et al.\ 2009 / ESDU)~\cite{vickery,esdu}, following the standard practice for
+reducing hurricane surface winds to a common exposure~\cite{powell1996}:
 \[
 \text{factor}=\frac{\ln(z_{\text{ref}}/z_{0,\text{land}})/\ln(z_g/z_{0,\text{land}})}
 {\ln(z_{\text{ref}}/z_{0,\text{marine}})/\ln(z_g/z_{0,\text{marine}})},
@@ -529,7 +558,7 @@ loss field as Mean Damage Ratio (right), both as filled contours.}
 \end{figure}
 
 \section{Statistics: Sensitivity and uncertainty analysis}\label{sec:sa}
-Following Iman, Johnson, and Schroeder (2001), as the ROA cites:
+Following Iman, Johnson, and Schroeder (2001)~\cite{iman}, as the ROA cites:
 \begin{itemize}
 \item \textbf{Sensitivity (SRC).} Standardized regression coefficients from
 regressing the standardized output on the six standardized inputs over the 100
@@ -562,12 +591,82 @@ Figs.~9--10. The windows are independently movable and resizable.}
 \label{fig:analysis}
 \end{figure}
 
+\section{Statistics: Sobol' indices (variance-based SA)}\label{sec:sobol}
+SRC is a \emph{first-order, linear} measure: it fits a plane through the response
+and reports the slopes. If the response bends, or if two inputs act jointly, SRC
+cannot see it. \textbf{Sobol' indices} \cite{sobol} answer the same question
+(``how is output uncertainty apportioned among the inputs?'') without assuming
+linearity, by decomposing the output \emph{variance} rather than fitting a line.
+Following the functional ANOVA decomposition,
+\[
+\mathrm{Var}[f(\mathbf{x})]=\sum_i \mathrm{Var}[f_i(x_i)]
+ +\sum_{i<j}\mathrm{Var}[f_{ij}(x_i,x_j)]+\cdots ,
+\]
+and dividing through by $\mathrm{Var}[f(\mathbf{x})]$ gives the \textbf{first-order}
+index $S_i$ (the variance explained by input $i$ \emph{alone}) and the
+\textbf{total} index $S_{T i}$ (input $i$ alone \emph{plus} every interaction it
+participates in). The gap $S_{Ti}-S_i$ is therefore a direct, quantitative measure
+of interaction---precisely the information SRC discards. Likewise
+$\sum_i S_i < 1$ signals that the main effects do not account for the whole
+variance, the shortfall being interaction.
+
+\paragraph{Why an emulator is required.} Sobol' estimation is Monte-Carlo and needs
+far more model evaluations than the $100$ Form S-6 vectors provide. The standard
+remedy, and the one recommended in the practitioner review of Francom and
+Nachtsheim \cite{francom}, is to fit an \emph{emulator} to the available runs and
+compute the indices on \emph{it}. We do exactly that: the indices are evaluated on
+the Gaussian-process metamodel of Section~\ref{sec:metamodel}, using the Saltelli
+\cite{saltelli2010} estimator for $S_i$ and the Jansen \cite{jansen1999} estimator
+for $S_{Ti}$, at $n=262{,}144$ samples averaged over three independent replicates.
+A separate emulator is fit for \emph{each land configuration}---surface roughness
+alone, and roughness with Kaplan--DeMaria decay---so the reported indices always
+describe the configuration actually selected in the viewer. Decay makes the response
+\emph{more} interactive, as one would expect of an added nonlinear process: for
+Cat~1 loss cost, $\sum_i S_i$ falls from $0.90$ to $0.83$ when it is switched on.
+
+\paragraph{Assumptions, checked.} Sobol' requires \emph{independent} inputs and an
+explicit input distribution. Both were verified rather than assumed. The six inputs
+are effectively uncorrelated (largest $|r|$ across the $15$ pairs is $0.04$ for
+Cat~1 and $0.05$ for Cat~3; Cat~5 shows a mild $r=+0.29$ between CP and $R_{\max}$,
+about $2.9\sigma$ at $n=100$ and consistent with Latin-hypercube sampling noise).
+Their marginals are \emph{uniform} over the sampled ranges (Kolmogorov--Smirnov
+$p=0.11$, $0.06$, $0.16$, and $1.00$ for CP, $R_{\max}$, VT, and WSP/CF/FFP), so
+sampling the Sobol' design uniformly on the observed box is the correct reference
+measure. A convergence check was also necessary: at the naive $n=2048$ the
+estimates still drifted by $\sim$$0.05$---as large as the interaction effect they
+were meant to detect---so the sample size was raised until the Monte-Carlo error
+fell an order of magnitude below the signal.
+
+\paragraph{Result: the model is nearly additive, with one real interaction.}
+Across all three categories and both responses, $\sum_i S_i$ lands between $0.90$
+and $0.97$: the main effects alone explain $90$--$97\%$ of the output variance, so
+the response is \emph{mostly} additive and SRC is not badly wrong. But the
+remaining $3$--$10\%$ is genuine interaction, and it is not spread evenly. The gap
+$S_{Ti}-S_i$ is significant (above its Monte-Carlo error) for $R_{\max}$ and WSP,
+and the second-order indices localise it precisely: $S_{ij}$ for the
+$R_{\max}\times$WSP pair is $+0.02$ to $+0.05$, an order of magnitude larger than
+any other pair, which sit at $\approx 0$. The storm's size and its wind-profile
+shape act on the loss \emph{jointly}---which is exactly what the interaction matrix
+(Figure~\ref{fig:matrix}) shows by eye, and what a linear SRC cannot express.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.62\textwidth]{analysis_sobol.png}
+\caption{Sobol' indices for Cat~5 peak wind, computed on the GPR emulator. Each bar
+is an input: the solid part is the main effect $S_i$, the shaded cap is the
+interaction $S_{Ti}-S_i$, and the whisker is $\pm2$ Monte-Carlo standard errors.
+$R_{\max}$ dominates; WSP carries the largest interaction share. The panel is
+reached from \textbf{Sensitivity} via the SRC\,/\,Sobol' method tabs, so the two
+methods sit one click apart.}
+\label{fig:sobol}
+\end{figure}
+
 \section{Statistics: Metamodels and the interaction profiler}\label{sec:metamodel}
 The standardized regression coefficients of Section~\ref{sec:sa} treat the
 input--output map as \emph{first order}: each input acts independently and
-linearly. A 2026 review of the Form~S-6 sensitivity procedure (M.~Johnson and
-colleagues) noted that the simulated response is in fact nonlinear and that the
-inputs \emph{interact}, and recommended replacing the linear fit with a flexible
+linearly. The Sobol' analysis of Section~\ref{sec:sobol} shows this is not quite
+true---$3$--$10\%$ of the output variance is interaction, concentrated in the
+$R_{\max}\times$WSP pair---which motivates replacing the linear fit with a flexible
 \emph{metamodel} (response surface, Gaussian-process regression, or neural
 network) examined through an interaction \emph{profiler}. The viewer implements
 this directly.
@@ -632,22 +731,32 @@ panel offers a second, all-at-once view of the same metamodel
 (Figure~\ref{fig:matrix}). It is an $N\!\times\!N$ grid over the six inputs: the
 diagonal labels each variable with its min$\,\to\,$max range, and each off-diagonal
 cell $(r,c)$ draws the effect of input $c$ on $\hat Y$ with input $r$ held at its
-\textcolor{red}{minimum (red)} and \textcolor{blue}{maximum (blue)}, all other
-inputs at their mean. Parallel red and blue curves mean no interaction; diverging
+\textcolor{blue}{minimum (blue)} and \textcolor{red}{maximum (red)}, all other
+inputs at their mean---a temperature metaphor, so red always reads as the high end
+of a scale. Parallel blue and red curves mean no interaction; diverging
 slopes or a widening gap mean $r$ and $c$ interact. Where the slider profiler is the
 interactive explorer (one reference point at a time), the matrix is a standing map
-of \emph{every} pairwise interaction at once---e.g.\ the $R_{\max}$ row shows a
-large red/blue separation against WSP and CF, the same interaction structure the
-sliders reveal one pair at a time. Both views are driven by the same fit; switching
-the \textbf{Metamodel} (Linear/GPR/NN) or response redraws either.
+of \emph{every} pairwise interaction at once. Both views are driven by the same fit;
+switching the \textbf{Metamodel} (Linear/GPR/NN) or response redraws either.
+
+Each off-diagonal cell is also \emph{annotated with its second-order Sobol' index}
+$S_{ij}$ (Section~\ref{sec:sobol}) and shaded in proportion to it, which turns a
+qualitative ``do these curves diverge?'' judgement into a measured one. The effect is
+striking: only the $R_{\max}\times$WSP cells shade red ($S_{ij}=0.055$), while every
+other pair reads $S_{ij}\approx 0.000$ and draws visibly parallel curves. A viewer
+might otherwise over-read a small visual separation elsewhere; the index says it is
+noise. The profiler likewise labels each input's panel with its $S_i$ and $S_{Ti}$,
+pairing the \emph{shape} of an effect with its \emph{magnitude}.
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.82\textwidth]{analysis_matrix.png}
 \caption{Interaction-matrix view (Category~5 Powell, $Y=$ mean peak wind). Diagonal:
 each input and its min$\to$max range. Off-diagonal cell $(r,c)$: the effect of input
-$c$ with input $r$ at min (red) vs max (blue), others at their mean; diverging
-red/blue indicates an $r\times c$ interaction.}
+$c$ with input $r$ at \textcolor{blue}{min (blue)} vs \textcolor{red}{max (red)},
+others at their mean; diverging curves indicate an $r\times c$ interaction. Each cell
+is annotated with its second-order Sobol' index $S_{ij}$ and shaded by it---only
+$R_{\max}\times$WSP lights up.}
 \label{fig:matrix}
 \end{figure}
 
@@ -904,6 +1013,136 @@ dominant parameter varies spatially across the grid.}
 \end{figure}
 
 \section{Computer science: Interface and reproducibility}
+
+\subsection{Design}\label{sec:design}
+Before the interface itself, two diagrams fix the shape of the computation.
+Figure~\ref{fig:dataflow} is the high-level data flow: land exposure enters on the
+left, is modified by the land effects, and is then carried through the three
+classical catastrophe-model stages---hazard, vulnerability, and loss costs.
+Figure~\ref{fig:activity} refines that flow into a UML activity diagram, showing
+the actual order of evaluation, the decision points at which a model is swapped,
+and the loop over the 100 Form S-6 input vectors.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=6mm and 8mm]
+  \node[dfsrc]                  (exp)  {Land\\Exposure};
+  \node[dfbox, right=of exp]    (land) {Land\\Effects};
+  \node[dfbox, right=of land]   (haz)  {Hazard};
+  \node[dfbox, right=of haz]    (vul)  {Vulnerability};
+  \node[dfbox, right=of vul]    (loss) {Loss\\Costs};
+  \draw[flow] (exp)  -- (land);
+  \draw[flow] (land) -- (haz);
+  \draw[flow] (haz)  -- (vul);
+  \draw[flow] (vul)  -- (loss);
+\end{tikzpicture}
+\caption{High-level data flow. Exposure at the 682 land vertices is conditioned by
+the land effects (surface roughness and Kaplan--DeMaria decay), which shape the
+hazard (the wind field); the hazard drives vulnerability (the damage curve), and
+vulnerability against exposure yields loss costs.}
+\label{fig:dataflow}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\scalebox{0.74}{%
+\begin{tikzpicture}
+  % ---------------- Hazard ----------------
+  \node[umlinit]  (start) at (0,0)      {};
+  \node[umlact]   (pick)  at (0,-1.2)   {Select input vector $i$\\
+                                         (CP, $R_{\max}$, VT, WSP, CF, FFP)};
+  \node[umldec]   (dmod)  at (0,-2.9)   {Wind-field\\model?};
+  \node[umlalt]   (hol)   at (-4.4,-4.5){Holland\\\emph{gradient profile}};
+  \node[umlalt]   (wil)   at (0,-4.5)   {Willoughby\\\emph{power law}};
+  \node[umlalt]   (pow)   at (4.4,-4.5) {Powell\\\emph{PBL slab solver}};
+  \node[umlmerge] (m1)    at (0,-5.9)   {};
+  \node[umldec]   (dland) at (0,-7.2)   {Land\\vertex?};
+  \node[umlact]   (rough) at (0,-8.7)   {Apply surface roughness\\
+                                         $+$ Kaplan--DeMaria decay};
+  \node[umlact]   (gust)  at (0,-10.0)  {Peak 3-s gust $V(x,y)$};
+
+  % ---------------- Vulnerability ----------------
+  \node[umldec]   (dvul)  at (0,-11.5)  {Damage\\model?};
+  \node[umlalt]   (haz1)  at (-3.4,-13.1){Vickery--ARA\\(HAZUS)};
+  \node[umlalt]   (log1)  at (3.4,-13.1) {Logistic\\$D(v)$};
+  \node[umlmerge] (m2)    at (0,-14.5)  {};
+  \node[umlact]   (mdr)   at (0,-15.7)  {$\mathrm{MDR}=D\big(V(x,y)\big)$};
+
+  % ---------------- Actuarial ----------------
+  \node[umldec]   (dexp)  at (0,-17.2)  {Exposure\\model?};
+  \node[umlalt]   (uni)   at (-4.4,-18.8){Uniform\\\emph{\$100k / vertex}};
+  \node[umlalt]   (cen)   at (0,-18.8)  {Census\\\emph{ACS B25082}};
+  \node[umlalt]   (tax)   at (4.4,-18.8){Tax Roll\\\emph{FL DOR}};
+  \node[umlmerge] (m3)    at (0,-20.2)  {};
+  \node[umlact]   (lc)    at (0,-21.4)  {$\text{loss}=\mathrm{MDR}\times
+                                         \text{exposure}_{x,y}$};
+  \node[umlact]   (agg)   at (0,-22.8)  {Aggregate over 682 land vertices\\
+                                         $\rightarrow$ total loss, \%LC};
+  \node[umldec]   (dmore) at (0,-24.4)  {More input\\vectors?};
+  \node[umlact]   (stats) at (0,-26.0)  {SRC sensitivity $+$ EPR uncertainty};
+  \node[umlfinal] (end)   at (0,-27.2)  {};
+
+  % ---------------- Hazard edges ----------------
+  \draw[flow] (start.south) -- (pick.north);
+  \draw[flow] (pick.south)  -- (dmod.north);
+  \draw[flow] (dmod.west)  -| (hol.north);
+  \draw[flow] (dmod.south) -- (wil.north);
+  \draw[flow] (dmod.east)  -| (pow.north);
+  \node[guard] at (-4.4,-3.85) {[Holland]};
+  \node[guard] at (-1.5,-4.05) {[Willoughby]};
+  \node[guard] at (4.4,-3.85)  {[Powell]};
+  \draw[flow] (hol.south) |- (m1.west);
+  \draw[flow] (wil.south) -- (m1.north);
+  \draw[flow] (pow.south) |- (m1.east);
+  \draw[flow] (m1.south)    -- (dland.north);
+  \draw[flow] (dland.south) -- (rough.north);
+  \node[guard] at (0.55,-7.95) {[land]};
+  \draw[flow] (rough.south) -- (gust.north);
+  % water vertices keep marine winds: bypass the land effects
+  \draw[flow] (dland.east) -- (5.2,-7.2) -- (5.2,-10.0) -- (gust.east);
+  \node[guard] at (3.05,-7.2) {[water: marine]};
+
+  % ---------------- Vulnerability edges ----------------
+  \draw[flow] (gust.south) -- (dvul.north);
+  \draw[flow] (dvul.west) -| (haz1.north);
+  \draw[flow] (dvul.east) -| (log1.north);
+  \node[guard] at (-3.4,-12.45) {[HAZUS]};
+  \node[guard] at (3.4,-12.45)  {[Logistic]};
+  \draw[flow] (haz1.south) |- (m2.west);
+  \draw[flow] (log1.south) |- (m2.east);
+  \draw[flow] (m2.south) -- (mdr.north);
+
+  % ---------------- Actuarial edges ----------------
+  \draw[flow] (mdr.south)  -- (dexp.north);
+  \draw[flow] (dexp.west) -| (uni.north);
+  \draw[flow] (dexp.south) -- (cen.north);
+  \draw[flow] (dexp.east) -| (tax.north);
+  \node[guard] at (-4.4,-18.15) {[Uniform]};
+  \node[guard] at (-1.4,-18.35) {[Census]};
+  \node[guard] at (4.4,-18.15)  {[Tax Roll]};
+  \draw[flow] (uni.south) |- (m3.west);
+  \draw[flow] (cen.south) -- (m3.north);
+  \draw[flow] (tax.south) |- (m3.east);
+  \draw[flow] (m3.south)  -- (lc.north);
+  \draw[flow] (lc.south)  -- (agg.north);
+  \draw[flow] (agg.south) -- (dmore.north);
+  \draw[flow] (dmore.south) -- (stats.north);
+  \node[guard] at (1.35,-25.2) {[no: all 100 done]};
+  \draw[flow] (stats.south) -- (end.north);
+  % loop back over the remaining input vectors
+  \draw[flow] (dmore.west) -- (-6.4,-24.4) -- (-6.4,-1.2) -- (pick.west);
+  \node[guard] at (-4.6,-24.4) {[yes]};
+\end{tikzpicture}}
+\caption{UML activity diagram for one evaluation pass. The three swappable model
+families appear as decision nodes with guarded branches---wind field (hazard),
+damage curve (vulnerability), and exposure (actuarial)---which is what makes the
+app a \emph{multimodel}. Water vertices bypass the land effects and keep marine
+winds. The outer loop repeats the pass for each of the 100 input vectors, after
+which the SRC and EPR statistics of Section~\ref{sec:sa} are computed.}
+\label{fig:activity}
+\end{figure}
+
+\subsection{Interface}
 The viewer offers model / category / input-vector selection (the input vector
 chooses one of the 100 randomized storms for the category), the WSP$\to B$
 distribution control (which now reshapes only the live single-point profiler,
@@ -1153,6 +1392,26 @@ ground. Part~II: Single point data for strong winds (neutral atmosphere)}. ESDU 
 
 \bibitem{aersurface} U.S. Environmental Protection Agency.
 \emph{AERSURFACE User's Guide}, land-cover to surface-roughness ($z_0$) tables.
+
+\bibitem{smithvogl} Smith, R.~K., and Vogl, S. (2008). A simple model of the
+hurricane boundary layer revisited. \emph{Quarterly Journal of the Royal
+Meteorological Society}, 134, 337--351.
+
+\bibitem{francom} Francom, D., and Nachtsheim, A. (2025). \emph{A Review and
+Comparison of Different Sensitivity Analysis Techniques in Practice}. Los Alamos
+National Laboratory. arXiv:2506.11471.
+
+\bibitem{sobol} Sobol', I.~M. (2001). Global sensitivity indices for nonlinear
+mathematical models and their Monte Carlo estimates. \emph{Mathematics and
+Computers in Simulation}, 55, 271--280.
+
+\bibitem{saltelli2010} Saltelli, A., Annoni, P., Azzini, I., Campolongo, F.,
+Ratto, M., and Tarantola, S. (2010). Variance based sensitivity analysis of model
+output. Design and estimator for the total sensitivity index. \emph{Computer
+Physics Communications}, 181, 259--270.
+
+\bibitem{jansen1999} Jansen, M.~J.~W. (1999). Analysis of variance designs for
+model output. \emph{Computer Physics Communications}, 117, 35--43.
 \end{thebibliography}
 
 \end{document}

@@ -1336,3 +1336,131 @@ SPEC_FEAT_`, so **building value = JV - LND_VAL - SPEC_FEAT_**.
 - `pyogrio.read_dataframe(where="DOR_UC IN (...)")` silently returns **0 rows** if
   `DOR_UC` is not also listed in `columns`. Cost an hour of false debugging.
 - Peak disk during a rebuild is ~12.6 GB (`data/`), all gitignored and deletable.
+
+---
+
+# Plan: Sobol' indices as a first-class sensitivity method (2026-07-11)
+
+Source: `pubs/Review and Comparison of SA Techniques.pdf` — Francom & Nachtsheim,
+*A Review and Comparison of Different Sensitivity Analysis Techniques in Practice*,
+LANL, arXiv:2506.11471 (2025).
+
+## What already exists (surveyed before planning)
+
+Sobol' is **already half-built**, which changes the shape of this task:
+
+- `pipeline/fit_metamodels.py:119` — `sobol_indices()` computes first-order **S1**
+  (Saltelli 2010) and total **ST** (Jansen 1999) on the **GPR emulator**, n=2048,
+  over the observed input box. Exported to `outputs/web/metamodels.json` under
+  `responses[resp][cat].sobol = {S1, ST}` for cat1/3/5 x {wind, tlc}.
+- `web/analysis.js:530` — **ST is currently hijacked as an "EPR" variant** when the
+  GPR metamodel is selected. **S1 is computed but never used anywhere.**
+
+So the work is mostly *surfacing and correcting*, not implementing from scratch.
+
+## Why the emulator route is the right one (and is already what we do)
+
+The paper is explicit: Sobol' needs either a vast number of model runs or an
+emulator. We have **100 runs** per (category, response) — far too few for direct
+Sobol', but squarely in the regime the paper recommends for a GP emulator. The
+existing GPR is exactly that emulator. No new sampling of the physics model needed.
+
+## Two assumption checks (both run, both pass)
+
+Sobol' requires **independent inputs** and a specified input distribution.
+
+- **Independence**: max |off-diagonal correlation| among the six inputs is 0.040
+  (cat1), 0.054 (cat3), 0.290 (cat5, CP~Rmax). cat1/cat3 clean; cat5 is a mild
+  correlation, ~2.9 sigma under n=100, plausibly LHS sampling noise. Flag it, do
+  not block on it.
+- **Marginals**: `sobol_indices()` samples uniform over `[X.min, X.max]`. KS tests
+  vs Uniform give p = 0.106 (CP), 0.062 (Rmax), 0.162 (VT), 1.000 (WSP/CF/FFP).
+  The inputs *are* uniform, so the existing box-uniform sampling is **valid**. This
+  was an unstated assumption in the code; it now has evidence behind it.
+
+## The payoff: what Sobol' buys that SRC cannot
+
+SRC is first-order and linear. Sobol' is variance-based and captures nonlinearity
+and interaction. Per the paper: **ST > S1 means the input participates in
+interactions**, and `ST - S1` quantifies how much. That gap is precisely the
+diagnostic Section 10 (metamodels + interaction profiler) exists to provide, and
+it can be stated *without* leaning on the unverifiable "2026 review" citation
+(see open item below).
+
+## Todo
+
+### Pipeline
+- [ ] Report the **S1/ST gap** per input in the `fit_metamodels.py` console summary.
+- [ ] Add a **convergence check**: recompute Sobol' at n=1024 vs 2048 vs 4096 and
+      assert indices are stable to ~0.01; record in the build log.
+- [ ] Emit the **sum of S1** per (cat, response). Sum(S1) << 1 is itself the
+      headline evidence of interaction; export it as `sobol.sum_S1`.
+- [ ] Record the **correlation caveat** for cat5 into `metamodels.json`.
+
+### Viewer (the presentation question)
+- [ ] Add a **Method** toggle inside the existing **Sensitivity** panel: `SRC` vs
+      `Sobol'`. One panel, two methods, same question — so they can be compared
+      directly. (Do *not* add a 5th top-level button.)
+- [ ] Sobol' view: **grouped bars per input, S1 and ST side by side**, with the
+      `ST - S1` gap shaded as "interaction". Y axis = proportion of output variance
+      (0..1). Annotate `sum(S1)` as "variance explained by main effects alone".
+- [ ] **Un-hijack EPR**: stop overloading EPR with Sobol' ST (`analysis.js:530`).
+      EPR is defined as SRC^2 x 100; conflating it with a variance-based total index
+      is a category error. Sobol' moves to Sensitivity, where it belongs.
+- [ ] Gate the Sobol' view on the default config (Powell + roughness), matching
+      where the emulator is actually fit; show a note otherwise (same pattern the
+      profiler already uses).
+
+### Docs (`docs/FormS6.tex`)
+- [ ] New subsection under Statistics: **Sobol' indices (variance-based SA)** —
+      functional ANOVA decomposition, S1, ST, the interaction reading of ST - S1,
+      the independence requirement, and the emulator justification for n=100.
+- [ ] Add `\bibitem{francom}` (Francom & Nachtsheim 2025) and `\bibitem{sobol}`
+      (Sobol' 2001).
+- [ ] State the two assumption checks above as *verified*, with numbers.
+- [ ] **Resolve the "2026 review" citation** (line 596). Sobol' + Francom gives a
+      real, citable basis for the nonlinearity/interaction claim, so the unverifiable
+      attribution can simply be replaced.
+
+## Open question for the user
+The cat5 CP~Rmax correlation (r = +0.29) mildly violates Sobol's independence
+assumption. Options: (a) accept and document, (b) Shapley values, which the paper
+recommends *specifically* for dependent inputs, (c) investigate whether the Form S-6
+sampler intends CP and Rmax to be correlated. Recommend (a) for now.
+
+## Review — Sobol' shipped (2026-07-11)
+
+### What changed
+- **Pipeline** (`pipeline/fit_metamodels.py`): Sobol' S1/ST with Monte-Carlo standard
+  errors, pure second-order S_ij, and an emulator fit for **both** land configs.
+- **Viewer** (`web/analysis.js`, `web/style.css`): SRC/Sobol' method tabs in the
+  Sensitivity panel; stacked bars (main effect + interaction cap + error bar); S_ij
+  annotation and red heat tint on the interaction matrix; S1/St labels on the
+  profiler; a banner that states whether the indices are on and why.
+- **Docs** (`docs/FormS6.tex`): new Section "Sobol' indices (variance-based SA)";
+  Francom & Nachtsheim, Sobol' 2001, Saltelli 2010, Jansen 1999 added to References.
+- **Test** (`tests/auto/check_sobol.py`): Selenium, drives the real viewer end to end.
+
+### Four things the work turned up
+1. **n=2048 was not converged.** The original Sobol' call drifted by ~0.05 between
+   sample sizes -- the *same magnitude as the interaction it was meant to measure*.
+   Raised to n=262,144 x 3 replicates, and every interaction now carries an error bar;
+   one is reported as real only when it clears 2 s.e.
+2. **ST was being mislabelled as EPR.** EPR is defined as SRC^2, a regression
+   quantity; a variance-based total index is a different thing. Sobol' moved to
+   Sensitivity, EPR restored to its definition.
+3. **The model is ~97% additive, with exactly one real interaction.** Sum(S1) is
+   0.90-0.97 everywhere. The whole interaction signal is Rmax x WSP (S_ij = +0.02 to
+   +0.05); every other pair is ~0.000. Storm size and wind-profile shape act jointly.
+4. **The K&D restriction was self-inflicted.** The decayed field was already sitting
+   in `powell_kd.json` at full (100 x 840) shape -- the pipeline simply never fit an
+   emulator to it ("Option A: default config only"). Fitting the second emulator
+   removed the restriction entirely; Sobol' now works in the shipped default. Decay
+   makes the response *more* interactive (Cat 1 loss: sum(S1) 0.90 -> 0.83).
+
+### Still open
+- The unverifiable "2026 review (M. Johnson and colleagues)" citation is **gone** --
+  the nonlinearity/interaction claim now rests on the measured Sobol' result plus
+  Francom & Nachtsheim, so no invented reference is needed.
+- `inputs/` remains untracked and `build_grid.py` / `read_inputs.py` /
+  `windfield_ua.py` still read the .xlsx from the repo root, where it no longer is.

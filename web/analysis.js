@@ -17,7 +17,8 @@ const VAR_COLORS = {
   CP: "#3b82f6", Rmax: "#22c55e", VT: "#f59e0b",
   WSP: "#111827", CF: "#ef4444", FFP: "#7c3aed",
 };
-const analysisState = { mode: null, cache: null };  // mode: 'src' | 'epr'
+// saMethod: which sensitivity method the Sensitivity panel shows ('src' | 'sobol')
+const analysisState = { mode: null, cache: null, saMethod: "src" };
 const profilerState = {           // metamodel + reference point + view/scale state
   mm: null, ref: null, view: "profiler",      // view: profiler | matrix
   scale: "footprint",             // footprint (metamodel) | point (direct simulation)
@@ -339,6 +340,10 @@ function pointRSMForPoint(model, cat, idx) {
 // (Powell + roughness, "Option A"); Linear/RSM stays live for every config.
 const METAMODEL_LABEL = { rsm: "Linear (RSM)", gpr: "Gaussian process", mlp: "Neural net" };
 const METAMODEL_COLOR = { rsm: "#2563eb", gpr: "#059669", mlp: "#b45309" };
+// Low/high encoding across the Statistics plots: a temperature metaphor, so red
+// always reads as the high end of a scale and blue as the low end.
+const LOW_COLOR = "#3b82f6";    // blue  = low  (input at min, weak interaction)
+const HIGH_COLOR = "#ef4444";   // red   = high (input at max, strong interaction)
 
 function currentMetamodel() {
   const el = document.getElementById("metamodel");
@@ -476,7 +481,10 @@ function openPanel(mode) {
     // size so the full plot + axis titles + legend + note fit without resizing
     const big = mode === "prof" || mode === "cmp";
     panels[mode].el.style.width = big ? "580px" : (mode === "fin" ? "500px" : "480px");
-    panels[mode].el.style.height = big ? "580px" : (mode === "fin" ? "600px" : "480px");
+    // "src" is taller than "epr": its Sobol' view carries the method tabs plus a
+    // multi-line note (sum S1, resolved interactions, independence caveat).
+    panels[mode].el.style.height = big ? "580px"
+      : (mode === "fin" ? "600px" : (mode === "src" ? "580px" : "480px"));
   }
   panels[mode].el.style.display = "flex";
   bringFront(panels[mode].el);
@@ -521,13 +529,17 @@ function drawChart(mode) {
     return;
   }
   const isEPR = mode === "epr";
+  // Sensitivity offers two methods: SRC (first-order regression) and Sobol'
+  // (variance-based). Sobol' lives here, not under EPR: EPR is defined as SRC^2,
+  // a regression quantity, so folding a variance-based total index into it would
+  // conflate two different definitions of "share of variance".
+  if (!isEPR && analysisState.saMethod === "sobol") return drawSobol(p);
+
   const cats = [1, 3, 5];
   // faithful EPR (wind-variance based) only for Powell + wind response; else SRC^2
   const model = analysisState.cache.model;
   const epr = (isEPR && model === "powell" && responseVar() === "wind")
     ? faithfulEPR() : null;
-  // GPR variance-based (Sobol total-effect) EPR when the GPR metamodel is selected
-  const useSobol = isEPR && currentMetamodel() === "gpr" && state.metamodels;
 
   // values per var per cat
   const series = {};
@@ -535,12 +547,7 @@ function drawChart(mode) {
   for (const v of SA_VARS) {
     series[v] = cats.map(c => {
       const src = data["cat" + c].src[v];
-      let val;
-      if (!isEPR) val = src;
-      else if (useSobol) {
-        const e = mmEntry(responseVar(), "cat" + c);
-        val = e ? e.sobol.ST[SA_VARS.indexOf(v)] * 100 : src * src * 100;
-      } else val = epr ? epr["cat" + c][v] : src * src * 100;
+      const val = !isEPR ? src : (epr ? epr["cat" + c][v] : src * src * 100);
       vmin = Math.min(vmin, val); vmax = Math.max(vmax, val);
       return val;
     });
@@ -589,12 +596,110 @@ function drawChart(mode) {
   const metricTxt = responseVar() === "tlc"
     ? "%TLC (loss cost, % of $68.2M exposure)" : "mean peak wind over 682 land pts";
   p.body.innerHTML =
+    (isEPR ? "" : methodTabs()) +
     svg + `<div class="legend2">${legend}</div>` +
     `<p class="note">${analysisState.cache.model} · metric: ${metricTxt}` +
     ` · land effect: ${analysisState.cache.land}<br>${r2}` +
-    (isEPR ? (useSobol ? "<br>EPR = Sobol total-effect index Sₜᵢ (GPR metamodel, default config)"
-                       : epr ? "<br>EPR = Var(Y|Xᵢ)/Var(Y) from UA sheets (faithful, marine)"
-                             : "<br>EPR ≈ SRC² (variance share)") : "") + "</p>";
+    (isEPR ? (epr ? "<br>EPR = Var(Y|Xᵢ)/Var(Y) from UA sheets (faithful, marine)"
+                  : "<br>EPR ≈ SRC² (variance share)") : "") + "</p>";
+  if (!isEPR) wireMethodTabs(p);
+}
+
+// ---- Sensitivity method switch: SRC (regression) vs Sobol' (variance) -----
+function methodTabs() {
+  const m = analysisState.saMethod || "src";
+  const b = (id, lbl) => `<button class="sa-tab${m === id ? " on" : ""}" data-m="${id}">${lbl}</button>`;
+  return `<div class="sa-tabs">${b("src", "SRC")}${b("sobol", "Sobol'")}</div>`;
+}
+
+function wireMethodTabs(p) {
+  p.body.querySelectorAll(".sa-tab").forEach(btn =>
+    btn.addEventListener("click", () => {
+      analysisState.saMethod = btn.dataset.m;
+      drawChart("src");
+    }));
+}
+
+// ---- Sobol' indices: stacked bar per input, main effect + interaction -----
+// Sobol' (2001) variance decomposition, estimated on the GPR emulator following
+// Francom & Nachtsheim (2025): with only 100 model runs, direct estimation is
+// hopeless, but the emulator makes it cheap. S1 = main effect; ST = total effect;
+// ST - S1 = the share of variance the input carries only through interactions --
+// exactly what SRC, being first-order and linear, cannot see.
+function drawSobol(p) {
+  p.title.textContent = "Sensitivity — Sobol' indices (variance-based)";
+  const s = sobolBlock();
+  if (!s) {
+    p.body.innerHTML = methodTabs() +
+      "<p class='note'>Sobol' indices are computed on a GPR emulator fit to the " +
+      "Powell (PDE) footprint with Surface roughness on (with or without Kaplan–DeMaria " +
+      "decay). Select that model and land effect, or use SRC, which runs live for any " +
+      "configuration.</p>";
+    wireMethodTabs(p);
+    return;
+  }
+  const n = SA_VARS.length;
+  const W = 440, H = 312, mL = 52, mR = 12, mT = 16, mB = 52;
+  const top = Math.max(1e-6, Math.max(...s.ST) * 1.25);
+  const bw = (W - mL - mR) / n * 0.58;
+  const xc = i => mL + (i + 0.5) * (W - mL - mR) / n;
+  const yv = v => mT + (1 - v / top) * (H - mT - mB);
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%">`;
+  svg += `<line x1="${mL}" y1="${yv(0)}" x2="${W - mR}" y2="${yv(0)}" stroke="#64748b"/>`;
+  svg += `<line x1="${mL}" y1="${mT}" x2="${mL}" y2="${H - mB}" stroke="#64748b"/>`;
+  for (let t = 0; t <= 4; t++) {
+    const val = (t / 4) * top;
+    svg += `<line x1="${mL}" y1="${yv(val)}" x2="${W - mR}" y2="${yv(val)}" stroke="#94a3b8" stroke-dasharray="2 4" opacity="0.4"/>`;
+    svg += `<text x="${mL - 5}" y="${yv(val) + 3}" text-anchor="end" class="ax">${val.toFixed(2)}</text>`;
+  }
+  SA_VARS.forEach((v, i) => {
+    const S1 = s.S1[i], ST = s.ST[i], gap = Math.max(0, ST - S1);
+    const c = VAR_COLORS[v];
+    // solid = main effect S1; hatched cap = interaction (ST - S1)
+    svg += `<rect x="${xc(i) - bw / 2}" y="${yv(S1)}" width="${bw}" height="${yv(0) - yv(S1)}" fill="${c}">` +
+           `<title>${v}  S₁ (main) = ${S1.toFixed(3)}</title></rect>`;
+    if (gap > 0) {
+      svg += `<rect x="${xc(i) - bw / 2}" y="${yv(ST)}" width="${bw}" height="${yv(S1) - yv(ST)}" ` +
+             `fill="${c}" opacity="0.32" stroke="${c}" stroke-dasharray="2 2">` +
+             `<title>${v}  interaction Sₜ−S₁ = ${gap.toFixed(3)}${s.resolved && s.resolved[i] ? " (resolved)" : " (within noise)"}</title></rect>`;
+    }
+    // Monte-Carlo error bar on the total index
+    const se = (s.se_ST && s.se_ST[i]) || 0;
+    if (se > 0) {
+      const x0 = xc(i);
+      svg += `<line x1="${x0}" y1="${yv(ST - 2 * se)}" x2="${x0}" y2="${yv(ST + 2 * se)}" stroke="#334155" stroke-width="1"/>`;
+      svg += `<line x1="${x0 - 3}" y1="${yv(ST + 2 * se)}" x2="${x0 + 3}" y2="${yv(ST + 2 * se)}" stroke="#334155"/>`;
+      svg += `<line x1="${x0 - 3}" y1="${yv(ST - 2 * se)}" x2="${x0 + 3}" y2="${yv(ST - 2 * se)}" stroke="#334155"/>`;
+    }
+    svg += `<text x="${xc(i)}" y="${H - mB + 16}" text-anchor="middle" class="ax">${v}</text>`;
+  });
+  const yMid = (mT + H - mB) / 2;
+  svg += `<text x="13" y="${yMid}" text-anchor="middle" transform="rotate(-90 13 ${yMid})" class="ax">Proportion of output variance</text>`;
+  svg += `<text x="${(mL + W - mR) / 2}" y="${H - 6}" text-anchor="middle" class="ax">Form S-6 input</text>`;
+  svg += `</svg>`;
+
+  const inter = 1 - s.sum_S1;
+  const hits = SA_VARS.filter((_, i) => s.resolved && s.resolved[i]);
+  const metricTxt = responseVar() === "tlc"
+    ? "%TLC (loss cost, % of exposure)" : "mean peak wind over 682 land pts";
+  // The indices now track the land configuration (a separate emulator is fit for the
+  // Kaplan-DeMaria-decayed field), so name the config the numbers actually describe.
+  const cfg = "Powell + roughness" +
+    (document.getElementById("landDecay").checked ? " + Kaplan–DeMaria decay" : "");
+  p.body.innerHTML = methodTabs() + svg +
+    `<div class="legend2">` +
+    `<span class="lgi"><span style="background:#64748b"></span>S₁ main effect</span>` +
+    `<span class="lgi"><span style="background:#64748b;opacity:.32"></span>Sₜ−S₁ interaction</span>` +
+    `<span class="lgi">⌶ ±2 s.e.</span></div>` +
+    `<p class="note">GPR emulator · ${cfg} · Cat ${document.getElementById("category").value} · metric: ${metricTxt}` +
+    `<br>Σ S₁ = <b>${s.sum_S1.toFixed(3)}</b> — main effects alone explain ` +
+    `${(s.sum_S1 * 100).toFixed(1)}% of output variance; the remaining ` +
+    `<b>${(inter * 100).toFixed(1)}%</b> is interaction.` +
+    `<br>Interactions resolved above Monte-Carlo noise: ${hits.length ? "<b>" + hits.join(", ") + "</b>" : "none"}.` +
+    `<br>Sobol' (2001) on ${(s.n).toLocaleString()}×${s.reps} emulator samples; assumes independent inputs ` +
+    `(max |r| = ${s.max_input_corr.toFixed(2)}, ${s.max_input_corr_pair}).</p>`;
+  wireMethodTabs(p);
 }
 
 // ---- interaction profiler (JMP-style prediction profiler) ----------------
@@ -781,10 +886,10 @@ function buildProfilerDOM() {
   }
 
   if (view === "matrix") {
-    p.body.innerHTML = toggles +
+    p.body.innerHTML = toggles + sobolBanner() +
       `<div class="prof-axis">Cell (row <b>r</b>, col <b>c</b>): effect of <b>c</b> on ${metricTxt} ` +
-      `with <b>r</b> at <span style="color:#ef4444">min (red)</span> / ` +
-      `<span style="color:#3b82f6">max (blue)</span>, others at mean. ` +
+      `with <b>r</b> at <span style="color:${LOW_COLOR}">min (blue)</span> / ` +
+      `<span style="color:${HIGH_COLOR}">max (red)</span>, others at mean. ` +
       (scale === "point" ? `Single point ${ptTxt}, ${pred.direct === false ? "per-vertex RSM" : "direct simulation"}. ` : "") +
       `Parallel = no interaction; diverging = interaction.</div>` +
       `<div class="prof-matrix" style="grid-template-columns:repeat(${mm.stats.length},1fr)"></div>` +
@@ -803,7 +908,7 @@ function buildProfilerDOM() {
       `step="${((s.max - s.min) / 100) || 0.01}" value="${ref[i]}"/>` +
       `<b data-v="${i}">${ref[i].toFixed(2)}</b></label>`;
   });
-  p.body.innerHTML = toggles +
+  p.body.innerHTML = toggles + sobolBanner() +
     `<div class="prof-axis">Each panel — <b>y</b>: ${metricTxt} &nbsp;·&nbsp; ` +
     `<b>x</b>: the named input over its range (dashed line = reference value)` +
     (scale === "point" ? ` &nbsp;·&nbsp; single point ${ptTxt}` : "") + `</div>` +
@@ -864,8 +969,8 @@ function drawInteractionMatrix() {
     for (let c = 0; c < N; c++) {
       if (r === c) {
         html += `<div class="prof-cell prof-diag"><div style="color:${VAR_COLORS[stats[r].v]}">${stats[r].v}</div>` +
-          `<div class="prof-diag-rng"><span style="color:#ef4444">${fmt(stats[r].min)}</span> → ` +
-          `<span style="color:#3b82f6">${fmt(stats[r].max)}</span></div></div>`;
+          `<div class="prof-diag-rng"><span style="color:${LOW_COLOR}">${fmt(stats[r].min)}</span> → ` +
+          `<span style="color:${HIGH_COLOR}">${fmt(stats[r].max)}</span></div></div>`;
         continue;
       }
       const sc = stats[c], xlo = sc.min, xhi = sc.max, xspan = (xhi - xlo) || 1;
@@ -879,16 +984,68 @@ function drawInteractionMatrix() {
         }
         return pts.trim();
       };
-      let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%"><title>${sc.v} vs ${stats[r].v}</title>`;
+      // Second-order Sobol' S_ij quantifies what the diverging curves show by eye.
+      // Available only where the emulator is fit (default config), so it is a
+      // gated annotation, not a requirement for the cell to draw.
+      const s2 = sobolS2(r, c);
+      let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%"><title>${sc.v} vs ${stats[r].v}` +
+        (s2 === null ? "" : `\nSobol' S_ij = ${s2.toFixed(4)}`) + `</title>`;
       svg += `<line x1="${mL}" y1="${ypix(ylo)}" x2="${W - mR}" y2="${ypix(ylo)}" stroke="#e2e8f0"/>`;
       svg += `<line x1="${mL}" y1="${mT}" x2="${mL}" y2="${H - mB}" stroke="#e2e8f0"/>`;
-      svg += `<polyline points="${curve(stats[r].min)}" fill="none" stroke="#ef4444" stroke-width="1.6"/>`;
-      svg += `<polyline points="${curve(stats[r].max)}" fill="none" stroke="#3b82f6" stroke-width="1.6"/>`;
-      svg += `<text x="${(mL + W - mR) / 2}" y="${H - 3}" text-anchor="middle" class="ax">${sc.v}</text></svg>`;
-      html += `<div class="prof-cell">${svg}</div>`;
+      svg += `<polyline points="${curve(stats[r].min)}" fill="none" stroke="${LOW_COLOR}" stroke-width="1.6"/>`;
+      svg += `<polyline points="${curve(stats[r].max)}" fill="none" stroke="${HIGH_COLOR}" stroke-width="1.6"/>`;
+      svg += `<text x="${(mL + W - mR) / 2}" y="${H - 3}" text-anchor="middle" class="ax">${sc.v}</text>`;
+      if (s2 !== null) {
+        // white halo so the value stays legible where a curve runs beneath it
+        svg += `<text x="${W - mR}" y="${mT + 6}" text-anchor="end" class="ax" ` +
+          `paint-order="stroke" stroke="#fff" stroke-width="3" stroke-linejoin="round" ` +
+          `style="font-weight:${s2 >= S2_STRONG ? 700 : 400}">S=${s2.toFixed(3)}</text>`;
+      }
+      svg += `</svg>`;
+      // heat tint: red = strong interaction, transparent = none (temperature scale)
+      const tint = s2 === null ? "" :
+        ` style="background:rgba(239,68,68,${Math.min(0.5, Math.max(0, s2) / S2_STRONG * 0.5).toFixed(3)})"`;
+      html += `<div class="prof-cell"${tint}>${svg}</div>`;
     }
   }
   grid.innerHTML = html;
+}
+
+// One line telling the user whether the Sobol' overlays are on, and if not, exactly
+// which control to change. Without this the gate is invisible: the numbers simply
+// fail to appear and there is nothing on screen explaining why.
+function sobolBanner() {
+  if (sobolBlock()) {
+    const kd = document.getElementById("landDecay").checked;
+    return `<div class="prof-axis sobol-on">Sobol' indices shown (GPR emulator, ` +
+      `roughness${kd ? " + Kaplan–DeMaria decay" : ""}): <b>S₁</b> main effect, ` +
+      `<b>Sₜ</b> total, <b>S</b> = pairwise Sᵢⱼ. Cells shaded red carry a real ` +
+      `interaction.</div>`;
+  }
+  return `<div class="prof-axis sobol-off">Sobol' indices hidden — they are computed ` +
+    `on a GPR emulator fit to the <b>Powell (PDE)</b> footprint with <b>Surface ` +
+    `roughness</b> on. Select that model and land effect to overlay S₁/Sₜ and the ` +
+    `pairwise Sᵢⱼ heat map.</div>`;
+}
+
+// The Sobol' block matching the CURRENT land configuration. Both are precomputed:
+// `sobol` for roughness alone, `sobol_kd` for roughness + Kaplan-DeMaria decay, so
+// the indices follow the decay toggle rather than being pinned to one config.
+// Returns null only where no emulator exists at all (non-Powell model, or roughness
+// off -- the emulator is always fit on the roughness-adjusted field).
+function sobolBlock() {
+  if (document.getElementById("model").value !== "powell") return null;
+  if (!document.getElementById("landRoughness").checked) return null;
+  const e = mmEntry(responseVar(), "cat" + document.getElementById("category").value);
+  if (!e) return null;
+  return document.getElementById("landDecay").checked
+    ? (e.sobol_kd || null) : (e.sobol || null);
+}
+
+const S2_STRONG = 0.02;         // |S_ij| at which a pair reads as a real interaction
+function sobolS2(i, j) {
+  const s = sobolBlock();
+  return (s && s.S2) ? s.S2[i][j] : null;
 }
 
 function updateProfilerPlots() {
@@ -919,10 +1076,25 @@ function updateProfilerPlots() {
     svg += `<polyline points="${pts.trim()}" fill="none" stroke="${VAR_COLORS[s.v]}" stroke-width="2"/>`;
     svg += `<circle cx="${xpix(ref[i]).toFixed(1)}" cy="${ypix(refY).toFixed(1)}" r="2.5" fill="${VAR_COLORS[s.v]}"/>`;
     svg += `<text x="${mL}" y="${H - 3}" class="ax">${s.v}</text>`;
+    // The curve shows the SHAPE of the effect; Sobol' gives its MAGNITUDE. St > S1
+    // means part of this input's influence is only visible through interactions --
+    // which is exactly what the sliders reveal by changing this curve's slope.
+    const sb = sobolFor(i);
+    if (sb) {
+      svg += `<text x="${W - mR}" y="${mT + 6}" text-anchor="end" class="ax" ` +
+        `paint-order="stroke" stroke="#fff" stroke-width="3" stroke-linejoin="round">` +
+        `S₁=${sb.S1.toFixed(2)} Sₜ=${sb.ST.toFixed(2)}</text>`;
+    }
     svg += `</svg>`;
     html += `<div class="prof-cell">${svg}</div>`;
   });
   grid.innerHTML = html;
+}
+
+// First-order / total Sobol' index for input i, or null where no emulator applies.
+function sobolFor(i) {
+  const s = sobolBlock();
+  return s ? { S1: s.S1[i], ST: s.ST[i] } : null;
 }
 
 // ---- empirical CDF of %TLC(i) over the 100 vectors (ROA Figure 5) ---------
@@ -1404,10 +1576,11 @@ function setupAnalysis() {
     const el = document.getElementById(id);
     if (el) el.addEventListener("input", () => { analysisState.cache = null; redrawOpenPanels(); });
   });
-  // metamodel choice drives profiler/compare (and EPR Sobol); no cache invalidation needed
+  // metamodel choice drives profiler/compare; no cache invalidation needed
   document.getElementById("metamodel").addEventListener("change",
-    () => redrawOpenPanels(["prof", "cmp", "epr"]));
-  // category change affects the per-category panels only (SRC/EPR span all cats)
+    () => redrawOpenPanels(["prof", "cmp"]));
+  // category change affects the per-category panels. "src" is included because its
+  // Sobol' view is per-category (the SRC view itself spans all three categories).
   document.getElementById("category").addEventListener("change",
-    () => redrawOpenPanels(["prof", "cmp", "cdf", "fin"]));
+    () => redrawOpenPanels(["prof", "cmp", "cdf", "fin", "src"]));
 }

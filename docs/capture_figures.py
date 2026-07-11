@@ -41,6 +41,11 @@ FIGURES = [
                           "display": "points", "colorBy": "wind"}, None),
     ("analysis_src",     {"model": "powell", "_btn": "btnSRC"}, ".analysis-panel"),
     ("analysis_epr",     {"model": "powell", "_btn": "btnEPR"}, ".analysis-panel"),
+    # Sobol' view of the Sensitivity panel. An emulator is fit for BOTH land configs,
+    # so these capture in the viewer's shipped default (roughness + K-D decay on).
+    ("analysis_sobol",   {"model": "powell", "category": "5", "_btn": "btnSRC",
+                         "_js": "[...document.querySelectorAll('.sa-tab')]"
+                                ".find(b=>b.dataset.m==='sobol').click();"}, ".analysis-panel"),
     ("analysis_profiler", {"model": "powell", "category": "5", "_btn": "btnProf"}, ".analysis-panel"),
     ("analysis_matrix", {"model": "powell", "category": "5", "_btn": "btnProf",
                         "_js": "[...document.querySelectorAll('.prof-tab')]"
