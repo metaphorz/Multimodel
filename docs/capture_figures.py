@@ -37,7 +37,9 @@ FIGURES = [
     ("powell_cat5_loss", {"model": "powell", "category": "5",
                           "landRoughness": False, "landDecay": True,
                           "colorBy": "loss", "display": "contour"}, None),
-    ("light_theme",      {"theme": "light", "model": "powell", "category": "3",
+    # Light is now the app default, so every other figure captures light; this one
+    # exists to show the OPTIONAL dark theme.
+    ("dark_theme",       {"theme": "dark", "model": "powell", "category": "3",
                           "display": "points", "colorBy": "wind"}, None),
     ("analysis_src",     {"model": "powell", "_btn": "btnSRC"}, ".analysis-panel"),
     ("analysis_epr",     {"model": "powell", "_btn": "btnEPR"}, ".analysis-panel"),

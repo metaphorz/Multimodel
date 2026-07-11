@@ -95,12 +95,11 @@ body.theme-light #legend .lg { color: #2a3744; }
 body.theme-light .analysis-group { background: #e2e8f0; color: #1c2530; }
 body.theme-light .analysis-group:hover { background: #d4dce5; }
 
-/* Mean / CSV buttons under the input-vector slider */
-.vec-actions { display: flex; gap: 6px; margin-top: 6px; }
-.vec-btn { flex: 1; padding: 6px; cursor: pointer; background: #2563eb; color: #fff;
-  border: none; border-radius: 5px; font-size: 13px; }
-.vec-btn:hover { background: #1d4ed8; }
-.vec-btn.active { background: #059669; }
+/* note under the input-vector slider (the slider is always live) */
+.hint { font-size: 11px; color: #94a3b8; margin: 6px 0 0; line-height: 1.35; }
+
+/* per-vector spatial summary in the Status panel */
+.stats { display: inline-block; margin-top: 2px; font-size: 11px; line-height: 1.4; }
 
 /* thin horizontal strip of the selected input vector's parameters (single-vector
    mode only — hidden when Mean/Max aggregation is active) */

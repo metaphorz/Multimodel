@@ -19,8 +19,11 @@ const state = {
   hoverTip: null,         // free-floating tooltip for nearest-point hover
   pixelPts: null,         // cached container-pixel coords of grid points
   metamodels: null,       // Phase B: precomputed GPR + NN params (default config)
-  meanMode: true,         // default view: per-point mean wind over all 100 vectors
-  maxMode: false,         // true -> per-point max (worst-case envelope) over 100 vectors
+  // The map always shows ONE input vector (the slider is never disabled). Averaging
+  // a field across the 100 vectors mixes 100 different storms into a vertex value
+  // that no storm ever produced; the quantities of interest are aggregates over the
+  // GRID POINTS of a single vector (total loss, and the spatial mean/max wind),
+  // which is also what the SA response Y has always been.
   layers: { track: null, landfall: null },
 };
 
@@ -367,7 +370,7 @@ function updateVecRow() {
   const el = document.getElementById("vecRow");
   if (!el) return;
   const { rec } = currentSelection();
-  if (state.meanMode || state.maxMode || !rec) {
+  if (!rec) {
     el.classList.add("hidden");
     el.innerHTML = "";
     return;
@@ -428,8 +431,6 @@ function computeWindFor(model, cat, vIdx) {
 
 function computeWind() {
   const { model, cat, vIdx } = currentSelection();
-  if (state.meanMode) return computeMeanWind(model, cat);
-  if (state.maxMode) return computeMaxWind(model, cat);
   return computeWindFor(model, cat, vIdx);
 }
 
@@ -438,9 +439,8 @@ function computeWind() {
 // it (all footprint windfields are precomputed), so we reuse the cached field.
 function windCacheKey() {
   const { model, cat, vIdx } = currentSelection();
-  const agg = state.meanMode ? "mean" : state.maxMode ? "max" : "v" + vIdx;
   const { rough, decay } = landState();
-  return [model, cat, agg, "r" + rough + "d" + decay].join("|");
+  return [model, cat, "v" + vIdx, "r" + rough + "d" + decay].join("|");
 }
 
 // computeWind() with memoization on windCacheKey(); only valid arrays are cached
@@ -454,46 +454,47 @@ function computeWindCached() {
   return wind;
 }
 
-// label for the active aggregation mode ("mean" | "max"), or null for single-vector
-function aggLabel() {
-  return state.meanMode ? "mean" : state.maxMode ? "max" : null;
+// ---- spatial statistics for ONE input vector -----------------------------
+// Aggregates over the 682 land GRID POINTS of the currently displayed storm.
+// These -- not any average across vectors -- are the model's outputs: TLC(i) is the
+// total loss the storm causes over the domain, and it is exactly the quantity the
+// Sensitivity / Sobol' panels regress on (see %TLC in the SA response selector).
+function vectorStats(wind) {
+  if (!wind || typeof wind === "string") return null;
+  const pts = state.grid.points;
+  let n = 0, wsum = 0, wmax = -Infinity, loss = 0;
+  for (let i = 0; i < pts.length; i++) {
+    if (!pts[i].land) continue;                 // outputs are defined over land
+    const w = wind[i];
+    if (w == null) continue;
+    n++; wsum += w;
+    if (w > wmax) wmax = w;
+    if (state.vuln) loss += mdrAt(w) * exposureAt(i);
+  }
+  if (!n) return null;
+  const exp = totalExposure();
+  return {
+    n,
+    windMean: wsum / n,
+    windMax: wmax,
+    tlc: state.vuln ? loss : null,               // total loss cost, $
+    pctTlc: (state.vuln && exp) ? loss / exp * 100 : null,   // as % of exposure
+    exposure: exp,
+  };
 }
 
-// per-point max peak wind (mph) over all 100 input vectors — a worst-case envelope,
-// respecting the current model/category/land-effect/B selection.
-function computeMaxWind(model, cat) {
-  const recs = state.inputs ? state.inputs[cat] : null;
-  if (!recs) return null;
-  let out = null, first = null;
-  for (let v = 0; v < recs.length; v++) {
-    const w = computeWindFor(model, cat, v);
-    if (first === null) first = w;
-    if (!w || typeof w === "string") continue;   // null or "kd-pending"
-    if (!out) out = new Float32Array(w.length).fill(-Infinity);
-    for (let i = 0; i < w.length; i++) if (w[i] > out[i]) out[i] = w[i];
+// The per-vector spatial summary shown in Status for every colour-by mode, so the
+// outputs of interest are always on screen rather than only in the loss view.
+// `withLoss=false` where the caller already prints TLC itself (the loss view).
+function vectorStatsHTML(wind, withLoss = true) {
+  const s = vectorStats(wind);
+  if (!s) return "";
+  const w = `wind mean <b>${s.windMean.toFixed(1)}</b> · max <b>${s.windMax.toFixed(1)}</b> mph`;
+  if (!withLoss || s.tlc == null) {
+    return `<br><span class="stats">Over ${s.n} land pts: ${w}</span>`;
   }
-  return out || first;                            // nothing computable yet
-}
-
-// per-point mean peak wind (mph) averaged over all 100 input vectors,
-// respecting the current model/category/land-effect/B selection.
-// Propagates null / "kd-pending" if no vector field is available yet.
-function computeMeanWind(model, cat) {
-  const recs = state.inputs ? state.inputs[cat] : null;
-  if (!recs) return null;
-  let sum = null, count = 0, first = null;
-  for (let v = 0; v < recs.length; v++) {
-    const w = computeWindFor(model, cat, v);
-    if (first === null) first = w;
-    if (!w || typeof w === "string") continue;   // null or "kd-pending"
-    if (!sum) sum = new Float64Array(w.length);
-    for (let i = 0; i < w.length; i++) sum[i] += w[i];
-    count++;
-  }
-  if (!sum) return first;                          // nothing computable yet
-  const out = new Float32Array(sum.length);
-  for (let i = 0; i < out.length; i++) out[i] = sum[i] / count;
-  return out;
+  return `<br><span class="stats">Over ${s.n} land pts: TLC <b>${fmtMoney(s.tlc)}</b> ` +
+         `(<b>${s.pctTlc.toFixed(2)}%</b> of exposure) · ${w}</span>`;
 }
 
 // Right-click a grid point -> per-point loss-cost CSV over all 100 input vectors.
@@ -604,10 +605,9 @@ function pointInfoHTML(i) {
   const colorBy = document.getElementById("colorBy").value;
   const { rec } = currentSelection();
   const w = state.wind ? state.wind[i] : null;
-  const agg = aggLabel();
   let wtxt = "";
   if (w != null) {
-    wtxt = `<b>${w.toFixed(1)} mph</b>${agg ? ` (${agg} of 100)` : ""}`;
+    wtxt = `<b>${w.toFixed(1)} mph</b>`;
     if (state.vuln && state.grid.points[i].land) {
       const mdr = mdrAt(w);
       wtxt += ` &middot; loss <b>${(mdr * 100).toFixed(1)}%</b> ($${Math.round(mdr * exposureAt(i)).toLocaleString()})`;
@@ -627,13 +627,11 @@ function pointInfoHTML(i) {
     rtxt = `<br>cover ${name || "?"} &middot; z0 ${R.z0_mm[i]} mm (fetch) &middot; ` +
            `&times;${R.factors[i].toFixed(3)}`;
   }
-  const params = agg
-    ? `<hr>${agg} over all 100 input vectors`
-    : (rec
-      ? `<hr>CP ${rec.CP} mb &middot; Rmax ${rec.Rmax} mi<br>` +
-        `VT ${rec.VT} mph &middot; FFP ${rec.FFP} mb<br>` +
-        `CF ${rec.CF} &middot; WSP ${rec.WSP} (B=${quantileToB(rec.WSP).toFixed(2)})`
-      : "");
+  const params = rec
+    ? `<hr>CP ${rec.CP} mb &middot; Rmax ${rec.Rmax} mi<br>` +
+      `VT ${rec.VT} mph &middot; FFP ${rec.FFP} mb<br>` +
+      `CF ${rec.CF} &middot; WSP ${rec.WSP} (B=${quantileToB(rec.WSP).toFixed(2)})`
+    : "";
   return `${wtxt}(${p.ew}, ${p.ns}) mi<br>${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}<br>` +
          `${p.land ? "land" : "water"}${p.place ? " &middot; " + p.place : ""}${rtxt}${params}`;
 }
@@ -813,7 +811,7 @@ function updateField() {
   const info = document.getElementById("info");
   const tag = `${model.charAt(0).toUpperCase() + model.slice(1)} · ` +
               `${currentSelection().cat.toUpperCase()} ` +
-              `${aggLabel() ? aggLabel() + " (100 vectors)" : "v" + document.getElementById("vector").value}`;
+              `v${document.getElementById("vector").value}`;
   if (aalMode && aal) {
     const rateTag = `λ ${finState.rates[1]}/${finState.rates[3]}/${finState.rates[5]} per yr`;
     info.innerHTML = `${model.charAt(0).toUpperCase() + model.slice(1)} · AAL (all cats) · ${rateTag}` +
@@ -835,15 +833,15 @@ function updateField() {
     info.textContent = "IKE needs inputs loaded…";
   } else if (lossMode && wind && state.vuln) {
     const pct = lossTotal / totalExposure() * 100;
-    info.innerHTML = `${tag}<br>Loss over ${n} land pts <b>${fmtMoney(lossTotal)}</b>` +
-      `<br>= <b>${pct.toFixed(2)}%</b> of ${fmtMoney(totalExposure())} exposure (${exposureMode()})`;
+    info.innerHTML = `${tag}<br>TLC over ${n} land pts <b>${fmtMoney(lossTotal)}</b>` +
+      `<br>= <b>${pct.toFixed(2)}%</b> of ${fmtMoney(totalExposure())} exposure (${exposureMode()})` +
+      vectorStatsHTML(wind, false);
   } else if (lossMode && kdPending) {
     info.textContent = "Powell Kaplan–DeMaria field: precompute pending.";
   } else if (lossMode) {
     info.textContent = "Vulnerability curve not loaded…";
   } else if (colorBy === "wind" && wind) {
-    info.innerHTML = `${tag}<br>Peak wind <b>${wmax.toFixed(1)} mph</b> · ` +
-      `land mean ${n ? (wsum / n).toFixed(1) : "–"} mph`;
+    info.innerHTML = `${tag}${vectorStatsHTML(wind)}`;
   } else if (colorBy === "wind" && kdPending) {
     info.textContent = "Powell Kaplan–DeMaria field: exact precompute scheduled after the UA run.";
   } else if (colorBy === "wind") {
@@ -879,35 +877,13 @@ function wireControls() {
   });
   updateDamageUI();   // reflect the initial damage-model selection
 
+  // The slider is always live: the map always shows exactly one input vector.
   const vec = document.getElementById("vector");
+  vec.disabled = false;
   vec.addEventListener("input", () => {
     document.getElementById("vectorLabel").textContent = vec.value;
     updateField();
   });
-  // Mean/Max are mutually-exclusive aggregations over the 100 vectors; null = single
-  // vector via the slider. Mean is the default view.
-  function setAggMode(mode) {
-    state.meanMode = mode === "mean";
-    state.maxMode = mode === "max";
-    document.getElementById("btnMean").classList.toggle("active", state.meanMode);
-    document.getElementById("btnMax").classList.toggle("active", state.maxMode);
-    vec.disabled = state.meanMode || state.maxMode;
-    if (mode) {
-      // defer so the "Computing…" status repaints before the (live-model) aggregation
-      document.getElementById("info").textContent = `Computing ${mode} over 100 vectors…`;
-      setTimeout(updateField, 20);
-    } else {
-      updateField();
-    }
-  }
-  // reflect the default (mean) at startup; init() does the first paint, so no recompute here
-  document.getElementById("btnMean").classList.toggle("active", state.meanMode);
-  document.getElementById("btnMax").classList.toggle("active", state.maxMode);
-  vec.disabled = state.meanMode || state.maxMode;
-  document.getElementById("btnMean").addEventListener("click",
-    () => setAggMode(state.meanMode ? null : "mean"));
-  document.getElementById("btnMax").addEventListener("click",
-    () => setAggMode(state.maxMode ? null : "max"));
 
   document.getElementById("showWater").addEventListener("change", updateField);
   document.getElementById("showGrid").addEventListener("change", updateField);

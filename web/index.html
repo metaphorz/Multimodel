@@ -8,7 +8,9 @@
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
-<body>
+<!-- light is the default theme; the class is set here too so the page does not
+     flash dark before applyTheme() runs -->
+<body class="theme-light">
   <div id="sidebar">
     <h1>Pro Team Multimodel</h1>
     <p class="credit">Pro Team &amp; Claude Code</p>
@@ -17,8 +19,8 @@
     <section>
       <h2>Theme</h2>
       <select id="theme">
-        <option value="dark" selected>Dark</option>
-        <option value="light">Light</option>
+        <option value="light" selected>Light</option>
+        <option value="dark">Dark</option>
       </select>
     </section>
 
@@ -78,10 +80,8 @@
       <h2>Input vector</h2>
       <input id="vector" type="range" min="1" max="100" value="1" />
       <span id="vectorLabel">1</span> / 100
-      <div class="vec-actions">
-        <button id="btnMean" class="vec-btn">Mean</button>
-        <button id="btnMax" class="vec-btn">Max</button>
-      </div>
+      <p class="hint">The map always shows one storm. Outputs (TLC, wind mean/max)
+        are totals over the land grid points for that vector &mdash; see Status.</p>
       <div id="vecRow" class="vec-row"></div>
     </section>
 

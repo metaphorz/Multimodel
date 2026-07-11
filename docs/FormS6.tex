@@ -1152,14 +1152,25 @@ the \textbf{Land model} checkboxes
 marine), a colour-by control
 (peak wind, loss MDR, land/water, or grid-point dominant-sensitivity), a
 points/filled-contour display toggle,
-light and dark themes (Figure~\ref{fig:light}), and nearest-point hover (peak
-wind, loss, coordinates, land/water, place name, and the active input
-parameters). Beneath the input-vector slider, mutually-exclusive \textbf{Mean} and
-\textbf{Max} toggles recolour the grid by, respectively, the per-vertex wind
-\emph{averaged} or \emph{maximised} over all 100 input vectors (for the current
-model, category, and land effect); the latter is a worst-case envelope. The viewer
-\emph{opens} in the mean view (the slider disabled), and clearing both toggles
-re-enables the slider to step through individual input vectors. \textbf{Right-clicking}
+light and dark themes (Figure~\ref{fig:light}; light is the default), and
+nearest-point hover (peak wind, loss, coordinates, land/water, place name, and the
+active input parameters).
+
+\paragraph{One vector at a time.} The map always displays exactly \emph{one} input
+vector, and the input-vector slider is always live. An earlier build opened instead
+on a per-vertex field \emph{averaged over the 100 vectors}, with the slider
+disabled. That view was withdrawn: averaging across vectors mixes 100 different
+storms into a vertex value that no single storm ever produces, and it is not a
+quantity the analysis ever asks for. The outputs of interest are aggregates over the
+\emph{grid points} of a \emph{given} vector---above all $\mathrm{TLC}(i)$, the total
+loss that storm $i$ inflicts over the domain. The Status panel therefore reports,
+for the displayed vector, the total loss cost (in dollars and as a percentage of
+exposure) together with the spatial mean and maximum of the peak wind over the 682
+land vertices. This is exactly the quantity the sensitivity analysis regresses on:
+the response $Y$ of Sections~\ref{sec:sa}--\ref{sec:sobol} is, and always was, a
+per-vector aggregate over the grid points, so map and analysis now agree.
+
+\textbf{Right-clicking}
 a vertex exports a per-point loss-cost CSV for the current model/category/land-effect:
 $100$ rows (one per input vector) by $9$ columns---the six Form S-6 inputs (CP,
 $R_{\max}$, VT, WSP, CF, FFP), the peak wind at that vertex ($\mathrm{MaxWind\_mph}$),
@@ -1251,9 +1262,10 @@ the default zoom.}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.46\textwidth]{light_theme.png}\hfill
+\includegraphics[width=0.46\textwidth]{dark_theme.png}\hfill
 \includegraphics[width=0.46\textwidth]{windfield_popup.png}
-\caption{Left: light theme, Powell Category~3 peak-wind points. Right: the
+\caption{Left: the optional dark theme, Powell Category~3 peak-wind points (the
+viewer opens in the light theme used for every other figure here). Right: the
 left-click windfield popup---storm-relative isotachs with the clicked vertex
 marked at its peak time, plus the per-vertex wind time series.}
 \label{fig:light}

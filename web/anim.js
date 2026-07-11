@@ -31,10 +31,9 @@ function animStormKey() {
   const { model, cat, vIdx } = currentSelection();
   const rough = document.getElementById("landRoughness").checked;
   const decay = document.getElementById("landDecay").checked;
-  // the static target footprint depends on the aggregation mode (mean/max/single),
-  // so include it — switching Mean/Max/vector must re-key the animation.
-  const agg = state.meanMode ? "mean" : state.maxMode ? "max" : "v" + vIdx;
-  return [model, cat, agg, "r" + rough, "d" + decay, ANIM.mode].join("|");
+  // the target footprint is that of the selected input vector; changing the vector
+  // must re-key the animation.
+  return [model, cat, "v" + vIdx, "r" + rough, "d" + decay, ANIM.mode].join("|");
 }
 
 // bilinear sample of a Powell storm-relative field Z (n x n over +/-halfKm) at
