@@ -23,7 +23,9 @@ import torch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-STORM_ANIM = os.path.expanduser("~/code/catmodel/wind/storm-anim")
+# the Powell slab PDE solver is vendored in-repo (pipeline/vendor/) so a fresh
+# clone can rebuild every windfield without files from the author's machine
+STORM_ANIM = os.path.join(HERE, "vendor")
 sys.path.insert(0, STORM_ANIM)
 import hurricane_pde_marine as H  # noqa: E402
 

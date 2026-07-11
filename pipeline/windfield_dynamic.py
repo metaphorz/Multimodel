@@ -30,7 +30,7 @@ import torch
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.expanduser("~/code/catmodel/wind/storm-anim"))
+sys.path.insert(0, os.path.join(HERE, "vendor"))   # vendored PDE solver
 import hurricane_pde_marine as H  # noqa: E402
 from windfield_grid import (  # noqa: E402
     make_args, cf_effective, intensity_schedule, build_track_land,

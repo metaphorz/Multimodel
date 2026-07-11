@@ -71,7 +71,12 @@ swappable or explorable so that visiting modelers can plug in their own componen
 
 The processes, methods, and data for this app are all public domain and open in the
 repository. The Pro Team provides this repository using the MIT License, which asserts
-no warranties. There may be inconsistencies or errors.
+no warranties. There may be inconsistencies or errors. Nothing the pipeline needs
+lives outside the clone: the Powell slab boundary-layer PDE solver
+(\texttt{hurricane\_pde\_marine.py}, written from scratch for this project's
+predecessor and validated against HURDAT2 tracks) and the HAZUS/ARA wind-vulnerability
+tool are both vendored under \texttt{pipeline/vendor/}, so a fresh clone can rebuild
+every wind field, the damage curve, and every figure in this report.
 
 \section{Meteorology: The grid and storm track}
 The grid (ROA Figs.~3--4) has $21\times40=840$ vertices at $\sim$3 statute-mile
