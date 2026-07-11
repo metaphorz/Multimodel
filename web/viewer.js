@@ -531,12 +531,22 @@ function downloadGridPointCsv(idx) {
   URL.revokeObjectURL(url);
 }
 
-// mean peak wind over land vertices — the SA/UA output metric
+// Aggregates over the land vertices for ONE input vector. These are the SA/UA
+// output metrics: the mean is the domain-average storm, the max is the worst-hit
+// vertex. They answer different questions and need not rank the inputs the same way
+// (a small, intense storm can raise the max while barely moving the mean).
 function landMeanWind(wind) {
   if (!wind || typeof wind === "string") return null;   // null or "kd-pending"
   let s = 0, n = 0;
   state.grid.points.forEach((p, i) => { if (p.land) { s += wind[i]; n++; } });
   return n ? s / n : null;
+}
+
+function landMaxWind(wind) {
+  if (!wind || typeof wind === "string") return null;
+  let m = -Infinity;
+  state.grid.points.forEach((p, i) => { if (p.land && wind[i] > m) m = wind[i]; });
+  return m > -Infinity ? m : null;
 }
 
 // ---- theme ---------------------------------------------------------------

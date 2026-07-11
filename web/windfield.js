@@ -1,7 +1,7 @@
 /* Live Holland & Willoughby windfields over the Form S-6 grid (client-side).
    Mirrors pipeline/windfield_grid.py + hurricane_pde_marine.py physics:
    gradient wind -> inflow rotation -> translation asymmetry -> CF conversion.
-   Powell (PDE) is precomputed in Python; these two are cheap enough to run live. */
+   Powell (steady) is precomputed in Python; these two are cheap enough to run live. */
 
 const PHYS = {
   MILE_M: 1609.344,

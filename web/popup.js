@@ -48,7 +48,7 @@ function windfieldBodyHTML(idx) {
   if (model === "powelldyn") {
     return "<p class='note'>Powell (dynamic) precomputes peak footprints only; the " +
       "field evolves in time, so no storm-relative popup series exists. Use " +
-      "Powell (PDE) for the popup time series.</p>";
+      "Powell (steady) for the popup time series.</p>";
   }
   if (model === "powell") {
     const pf = state.powellField && state.powellField[cat] && state.powellField[cat][vIdx];

@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "outputs" / "web"
 VARS = ["CP", "Rmax", "VT", "WSP", "CF", "FFP"]
 CATS = ["cat1", "cat3", "cat5"]
-RESPONSES = ["wind", "tlc"]
+RESPONSES = ["wind", "windmax", "tlc"]
 SEED = 0
 # Sobol' Monte-Carlo budget. n=2048 (the original) left the indices drifting by
 # ~0.05 -- as large as the interaction effect itself. Converged to <0.01 here.
@@ -65,11 +65,18 @@ def mdr_at(wind, xs, mdr):
 
 
 def metric_columns(powell, factors, land, xs, mdr, cat, response):
-    """Per-vector scalar Y for the default config (Powell * roughness)."""
+    """Per-vector scalar Y: an aggregate over the land GRID POINTS of one vector.
+
+    Every response reduces axis 1 (the 682 land vertices), leaving one value per
+    input vector -- never an average across vectors. `wind` is the domain-average
+    storm, `windmax` the worst-hit vertex, `tlc` the domain total loss.
+    """
     fields = np.array(powell[cat], dtype=float) * factors[None, :]    # (100, 840)
     landfields = fields[:, land]                                      # (100, n_land)
     if response == "wind":
         return landfields.mean(axis=1)                               # mean land peak wind
+    if response == "windmax":
+        return landfields.max(axis=1)                                # worst-hit vertex
     # %TLC = 100 * mean land MDR  (= TLC / $68.2M exposure)
     return 100.0 * mdr_at(landfields, xs, mdr).mean(axis=1)
 

@@ -327,8 +327,10 @@ input distribution, not as forecasts. The four precomputed products
 (\texttt{powell\_dyn\{,\_kd,\_rough,\_kd\_rough\}.json}) cover the
 decay$\times$roughness checkbox states; Powell (dynamic) provides peak footprints
 only (no storm-relative popup series or animation --- the field is no longer
-translation-invariant), and the steady \textbf{Powell (PDE)} option is retained
-unchanged as the reference.
+translation-invariant), and the \textbf{Powell (steady)} option is retained
+unchanged as the reference. The two are labelled \emph{steady} and \emph{dynamic}
+rather than ``PDE'' and ``dynamic'': both solve the same slab boundary-layer PDE,
+and what separates them is whether it is integrated in time.
 
 \section{Meteorology: Land effect---roughness and decay}
 The storm's interaction with the land is modelled by two \emph{independent},
@@ -673,9 +675,12 @@ this directly.
 
 \paragraph{Response variable.}
 A \textbf{Response (Y)} selector chooses the scalar output that every analysis
-tool regresses on: either the \textbf{mean peak wind} over the 682 land vertices
-(Section~\ref{sec:sa}) or the \textbf{loss cost} $\%\text{TLC}(i)$, defined
-exactly as in Section~\ref{sec:loss},
+tool regresses on. Every choice is an aggregate over the 682 land \emph{grid
+points} of a \emph{single} input vector---never an average across vectors---and the
+selector is therefore also the control for \emph{which} grid-point statistic is
+reported: the \textbf{mean peak wind} (the domain-average storm), the \textbf{max
+peak wind} (the worst-hit vertex), or the \textbf{loss cost} $\%\text{TLC}(i)$ (the
+domain total), defined exactly as in Section~\ref{sec:loss},
 \[
 \%\text{TLC}(i)=\frac{\text{TLC}(i)}{\$68{,}200{,}000}\times100\%
 =100\times\overline{\text{MDR}}_{\text{land}}(i),
@@ -687,6 +692,25 @@ faithful EPR worksheets do not apply, so the $\text{SRC}^2$ variance share is
 used). Two further responses---\emph{duration} and \emph{wind dosage}---are
 location-level diagnostics available only in single-point mode; they are defined
 with the spatial-scale toggle below.
+
+\paragraph{The aggregate is not a cosmetic choice.} Which grid-point statistic one
+takes \emph{changes which input dominates}. For Category~5 (roughness and decay on)
+the first-order Sobol' indices are
+\[
+\begin{array}{lccc}
+\text{input} & \text{mean wind} & \text{max wind} & \%\text{TLC}\\\hline
+R_{\max} & \mathbf{0.659} & 0.066 & \mathbf{0.469}\\
+\text{WSP} & 0.149 & \mathbf{0.748} & 0.314\\
+\text{VT} & 0.042 & 0.000 & 0.040
+\end{array}
+\]
+Storm \emph{size} ($R_{\max}$) governs the domain mean and the total loss---it sets
+how much of the grid is struck at all. But the \emph{profile shape} (WSP, hence $B$)
+governs the worst-hit vertex, because it sets the eyewall peak; there $R_{\max}$
+collapses to $0.07$ and forward speed to zero. A sensitivity ranking is therefore
+only meaningful once the output has been named, which is precisely the
+statistician's point: the quantity of interest is an aggregate over the grid points
+of a \emph{given} vector, and different aggregates are different questions.
 
 \paragraph{Second-order metamodel.}
 For the profiler the viewer fits, per category, a standardized second-order

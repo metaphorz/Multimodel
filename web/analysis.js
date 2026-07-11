@@ -57,7 +57,19 @@ function solve(A, b) {
 // ---- response variable Y (user-toggleable) -------------------------------
 function responseVar() {
   const el = document.getElementById("response");
-  return el ? el.value : "wind";          // 'wind' | 'tlc' | 'dwell' | 'dosage'
+  return el ? el.value : "wind";          // 'wind' | 'windmax' | 'tlc' | 'dwell' | ...
+}
+
+// Human labels for the response Y, in one place so every panel says the same thing.
+// `long` spells out that Y is an aggregate over the grid points of ONE input vector.
+const RESP_LABEL = {
+  wind:    { short: "mean peak wind (mph)", long: "mean peak wind over 682 land pts" },
+  windmax: { short: "max peak wind (mph)",  long: "max peak wind over 682 land pts" },
+  tlc:     { short: "%TLC",                 long: "%TLC (loss cost, % of exposure)" },
+};
+function respLabel(kind) {
+  const e = RESP_LABEL[responseVar()];
+  return e ? e[kind] : responseVar();
 }
 
 // wind speed (mph, surface) at which structural damage begins to accumulate
@@ -180,7 +192,10 @@ function pctTLC(wind) {
 function outputMetric(model, cat, vIdx) {
   const wind = computeWindFor(model, cat, vIdx);
   if (!wind || typeof wind === "string") return null;     // null / "kd-pending"
-  return responseVar() === "tlc" ? pctTLC(wind) : landMeanWind(wind);
+  const r = responseVar();
+  if (r === "tlc") return pctTLC(wind);
+  if (r === "windmax") return landMaxWind(wind);
+  return landMeanWind(wind);
 }
 
 // ---- compute SRC for the selected model, all categories ------------------
@@ -491,7 +506,7 @@ function openPanel(mode) {
   if (document.getElementById("model").value === "powelldyn") {
     panels[mode].body.innerHTML = "<p class='note'>Analysis panels use the steady " +
       "Powell metamodels / live Holland&ndash;Willoughby fields. Powell (dynamic) is a " +
-      "peaks-only precompute &mdash; switch to Powell (PDE) for analysis.</p>";
+      "peaks-only precompute &mdash; switch to Powell (steady) for analysis.</p>";
     return;
   }
   panels[mode].body.innerHTML = "<p class='note'>Computing…</p>";
@@ -593,8 +608,7 @@ function drawChart(mode) {
   const title = isEPR ? "Uncertainty — EPR (% of output variance)"
                       : "Sensitivity — SRC (standardized regression coeff.)";
   p.title.textContent = title;
-  const metricTxt = responseVar() === "tlc"
-    ? "%TLC (loss cost, % of $68.2M exposure)" : "mean peak wind over 682 land pts";
+  const metricTxt = respLabel("long");
   p.body.innerHTML =
     (isEPR ? "" : methodTabs()) +
     svg + `<div class="legend2">${legend}</div>` +
@@ -632,7 +646,7 @@ function drawSobol(p) {
   if (!s) {
     p.body.innerHTML = methodTabs() +
       "<p class='note'>Sobol' indices are computed on a GPR emulator fit to the " +
-      "Powell (PDE) footprint with Surface roughness on (with or without Kaplan–DeMaria " +
+      "Powell (steady) footprint with Surface roughness on (with or without Kaplan–DeMaria " +
       "decay). Select that model and land effect, or use SRC, which runs live for any " +
       "configuration.</p>";
     wireMethodTabs(p);
@@ -681,8 +695,7 @@ function drawSobol(p) {
 
   const inter = 1 - s.sum_S1;
   const hits = SA_VARS.filter((_, i) => s.resolved && s.resolved[i]);
-  const metricTxt = responseVar() === "tlc"
-    ? "%TLC (loss cost, % of exposure)" : "mean peak wind over 682 land pts";
+  const metricTxt = respLabel("long");
   // The indices now track the land configuration (a separate emulator is fit for the
   // Kaplan-DeMaria-decayed field), so name the config the numbers actually describe.
   const cfg = "Powell + roughness" +
@@ -853,6 +866,8 @@ function buildProfilerDOM() {
     responseVar() === "ike" ? "IKE (TJ·h)" :
     responseVar() === "ikepeak" ? "peak IKE (TJ)" :
     responseVar() === "accloss" ? "%LC accumulated" :
+    responseVar() === "windmax" ? (profilerState.scale === "point"
+      ? "peak wind (mph)" : "max peak wind (mph)") :
     "peak wind (mph)";
   const view = profilerState.view, scale = profilerState.scale;
   profilerState.pred = profilerPredictor();
@@ -1023,7 +1038,7 @@ function sobolBanner() {
       `interaction.</div>`;
   }
   return `<div class="prof-axis sobol-off">Sobol' indices hidden — they are computed ` +
-    `on a GPR emulator fit to the <b>Powell (PDE)</b> footprint with <b>Surface ` +
+    `on a GPR emulator fit to the <b>Powell (steady)</b> footprint with <b>Surface ` +
     `roughness</b> on. Select that model and land effect to overlay S₁/Sₜ and the ` +
     `pairwise Sᵢⱼ heat map.</div>`;
 }
@@ -1203,7 +1218,7 @@ function drawCompare() {
   const rows = have.map(t =>
     `<tr><td style="color:${METAMODEL_COLOR[t]}">${METAMODEL_LABEL[t]}</td>` +
     `<td>${mms[t].r2.toFixed(3)}</td><td>${mms[t].cv != null ? mms[t].cv.toFixed(3) : "—"}</td></tr>`).join("");
-  const metricTxt = responseVar() === "tlc" ? "%TLC" : "mean peak wind (mph)";
+  const metricTxt = respLabel("short");
   p.body.innerHTML =
     `<div class="prof-axis">Each panel — <b>y</b>: ${metricTxt} &nbsp;·&nbsp; ` +
     `<b>x</b>: the named input over its range</div>` +

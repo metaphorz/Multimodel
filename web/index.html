@@ -27,7 +27,9 @@
     <section>
       <h2>Windfield model</h2>
       <select id="model">
-        <option value="powell">Powell (PDE)</option>
+        <!-- both solve the same slab PDE; the distinction is steady-state vs
+             time-dependent, not PDE vs not -->
+        <option value="powell">Powell (steady)</option>
         <option value="powelldyn">Powell (dynamic)</option>
         <option value="holland">Holland</option>
         <option value="willoughby">Willoughby</option>
@@ -123,8 +125,11 @@
       <h2>Analysis (Form S-6)</h2>
       <label>Response (Y)
         <select id="response">
-          <option value="wind" selected>Mean peak wind</option>
-          <option value="tlc">Loss cost %TLC</option>
+          <!-- Y is always an aggregate over the 682 land GRID POINTS of one input
+               vector: mean = domain average, max = worst-hit vertex, %TLC = total -->
+          <option value="wind" selected>Mean peak wind (over grid pts)</option>
+          <option value="windmax">Max peak wind (over grid pts)</option>
+          <option value="tlc">Loss cost %TLC (total over grid pts)</option>
           <option value="dwell">Duration V&ge;40 mph (h)</option>
           <option value="dosage">Wind dosage &int;(V&minus;40)&#8314; dt (mph&middot;h)</option>
           <option value="ike">IKE integrated (TJ&middot;h)</option>
