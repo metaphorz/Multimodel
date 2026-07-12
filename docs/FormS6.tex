@@ -820,6 +820,85 @@ methods sit one click apart.}
 \label{fig:sobol}
 \end{figure}
 
+\subsection{Verification: an independent Sobol' analysis in JMP}\label{sec:jmpcheck}
+The Sobol' machinery above was verified against an entirely separate
+implementation. A statistician, working independently in \textbf{JMP}, exported the
+per-vertex loss-cost table for the Boynton Beach vertex $(\mathrm{ew},\mathrm{ns})=(6,45)$
+---the $100$ input vectors against $\%\mathrm{LC}$ at that point---fitted JMP's own
+Gaussian-process model, and read off the Sobol' indices its platform derives
+\emph{analytically} from the fitted kernel. Our figures for the same vertex come from a
+scikit-learn GPR with the indices estimated by \emph{Monte Carlo} (Saltelli for $S_i$,
+Jansen for $S_{Ti}$, $262{,}144\times3$ samples). Different software, different
+emulator code, different index mathematics:
+
+\begin{center}\small
+\begin{tabular}{lrrrrrr}
+\toprule
+ & \multicolumn{3}{c}{main effect $S_i$} & \multicolumn{3}{c}{total effect $S_{Ti}$}\\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+input & JMP & ours & $\Delta$ & JMP & ours & $\Delta$\\
+\midrule
+CP        & 0.0098 & 0.0096 & $-0.0002$ & 0.0171 & 0.0170 & $-0.0001$\\
+$R_{\max}$& 0.8216 & 0.8251 & $+0.0035$ & 0.9086 & 0.9100 & $+0.0014$\\
+VT        & 0.0087 & 0.0088 & $+0.0000$ & 0.0149 & 0.0153 & $+0.0004$\\
+WSP       & 0.0080 & 0.0082 & $+0.0002$ & 0.0352 & 0.0363 & $+0.0010$\\
+CF        & 0.0552 & 0.0556 & $+0.0004$ & 0.1021 & 0.1024 & $+0.0003$\\
+FFP       & 0.0059 & 0.0059 & $-0.0001$ & 0.0097 & 0.0096 & $-0.0001$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+All fifteen pairwise indices were compared as well, and they agree to within
+$0.0004$---and, notably, preserve their \emph{ranking}, down to the three pairs that
+are numerically zero in both:
+
+\begin{center}\small
+\begin{tabular}{lrr@{\hskip 2em}lrr}
+\toprule
+pair & JMP & ours & pair & JMP & ours\\
+\midrule
+$R_{\max}\!\times\!$CF  & 0.0454 & 0.0452 & VT\,$\times$\,CF        & 0.0003 & 0.0004\\
+$R_{\max}\!\times\!$WSP & 0.0257 & 0.0255 & WSP\,$\times$\,FFP      & 0.0001 & 0.0003\\
+CP\,$\times R_{\max}$   & 0.0068 & 0.0065 & CP\,$\times$\,WSP       & 0.0001 & 0.0002\\
+$R_{\max}\!\times\!$VT  & 0.0054 & 0.0058 & CF\,$\times$\,FFP       & 0.0001 & 0.0001\\
+$R_{\max}\!\times\!$FFP & 0.0036 & 0.0040 & CP\,$\times$\,VT        & 0.0000 & 0.0000\\
+WSP\,$\times$\,CF       & 0.0008 & 0.0011 & CP\,$\times$\,FFP       & 0.0000 & 0.0000\\
+VT\,$\times$\,WSP       & 0.0005 & 0.0004 & VT\,$\times$\,FFP       & 0.0000 & 0.0000\\
+CP\,$\times$\,CF        & 0.0004 & 0.0004 &                         &        &      \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The worst disagreement anywhere is $0.0035$ (main effects), $0.0014$ (totals),
+$0.0004$ (interactions). The decisive number is the comparison against our \emph{own}
+sampling noise: the Monte-Carlo standard error on our main effects is $0.0049$, which is
+\emph{larger} than our disagreement with JMP. We therefore do not differ from JMP by more
+than we differ from ourselves between sampling runs---there is no detectable discrepancy
+at all, and the sampling budget of Section~\ref{sec:sobol} is confirmed adequate.
+
+\paragraph{What this does and does not establish.} It validates the \emph{implementation}:
+our GPR fit, our Saltelli/Jansen estimators, and the convergence of the sampling. It
+does \emph{not} validate the physics, because both analyses were fed the same exported
+$\%\mathrm{LC}$ column---a wrong wind field would have been reproduced faithfully by
+both. Nor does it validate the choice of method, since both used a Gaussian-process
+emulator. What it does rule out is an error in the statistical chain, which is the part
+this section is responsible for.
+
+\paragraph{A vertex is a fingerprint.} The agreement also identifies the vertex beyond
+doubt, which is worth noting because the indices are so location-specific. At $(6,45)$,
+$R_{\max}$ carries $S_i=0.82$; at the nearby Dania Beach vertex it is $0.63$, at Key
+Biscayne $0.37$, and \emph{on} the track it collapses to $0.02$. No other vertex comes
+within $0.10$ of JMP's numbers.
+
+\paragraph{And the physics is instructive.} Boynton Beach sits $45$\,mi \emph{north} of
+the track. The only question that matters there is whether the storm's wind field
+\emph{reaches} that far---which is precisely what $R_{\max}$ governs, hence
+$S_{R_{\max}}=0.82$. Whether the eyewall is sharply peaked (WSP) is nearly irrelevant
+at that distance, and WSP duly collapses to $0.008$. This is the \emph{inverse} of the
+footprint-level ranking of Section~\ref{sec:sobol}, where WSP is a leading driver. One
+off-track vertex overturns the domain-wide answer, which is the clearest possible
+argument for the single-point profiler of Section~\ref{sec:metamodel} existing at all.
+
 \section{Statistics: Metamodels and the interaction profiler}\label{sec:metamodel}
 The standardized regression coefficients of Section~\ref{sec:sa} treat the
 input--output map as \emph{first order}: each input acts independently and
