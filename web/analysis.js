@@ -69,7 +69,10 @@ const RESP_LABEL = {
 };
 function respLabel(kind) {
   const e = RESP_LABEL[responseVar()];
-  return e ? e[kind] : responseVar();
+  if (!e) return responseVar();
+  // name the exposure model: %TLC means a different thing under Census than Uniform
+  return responseVar() === "tlc"
+    ? `${e[kind]} · ${exposureMode()} exposure` : e[kind];
 }
 
 // wind speed (mph, surface) at which structural damage begins to accumulate
@@ -365,10 +368,19 @@ function currentMetamodel() {
   return el ? el.value : "rsm";       // 'rsm' | 'gpr' | 'mlp'
 }
 
+// The loss emulator is fit per exposure model, because value is concentrated enough
+// (Census Gini 0.84) that WHERE the wind lands changes the total loss -- so a single
+// Uniform fit would make every loss-cost SRC/EPR/Sobol' answer the wrong question.
+// The wind responses do not depend on exposure.
+function mmKey(response) {
+  return response === "tlc" ? "tlc_" + exposureMode() : response;
+}
+
 function mmEntry(response, cat) {
   const mm = state.metamodels;
-  return (mm && mm.responses[response] && mm.responses[response][cat])
-    ? mm.responses[response][cat] : null;
+  const key = mmKey(response);
+  return (mm && mm.responses[key] && mm.responses[key][cat])
+    ? mm.responses[key][cat] : null;
 }
 
 function standardizeRaw(raw, scaler) {
@@ -1598,4 +1610,10 @@ function setupAnalysis() {
   // Sobol' view is per-category (the SRC view itself spans all three categories).
   document.getElementById("category").addEventListener("change",
     () => redrawOpenPanels(["prof", "cmp", "cdf", "fin", "src"]));
+  // Exposure changes the loss response itself (a different emulator is fit per
+  // exposure model), so every loss-driven panel must refit, not just recolour.
+  document.getElementById("exposureModel").addEventListener("change", () => {
+    analysisState.cache = null;
+    redrawOpenPanels();
+  });
 }

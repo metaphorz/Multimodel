@@ -949,6 +949,10 @@ async function init() {
     catch (e) { state.vuln = null; }         // MDR vs wind (loss)
     try { state.metamodels = await (await fetch("../outputs/web/metamodels.json", NC)).json(); }
     catch (e) { state.metamodels = null; }   // Phase B: precomputed GPR + NN (default config)
+    // Manifest only (a few KB). The frame files themselves are fetched one storm at a
+    // time by anim.js -- 18 MB of them exist, and eager-loading would stall the UI.
+    try { state.dynFrames = await (await fetch("../outputs/web/dyn_frames.json", NC)).json(); }
+    catch (e) { state.dynFrames = null; }    // dynamic-Powell animation frames
     buildMap();
     setupHover();
     setupAnalysis();

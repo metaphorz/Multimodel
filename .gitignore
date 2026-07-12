@@ -34,3 +34,7 @@ docs/build.log
 
 # Local email correspondence (never commit)
 *.eml
+
+# Dynamic-Powell animation frames: 18 MB of generated uint8 fields (300 storms).
+# Committed deliberately once the precompute completes, NOT while it is mid-run --
+# a partial set would ship a viewer that 404s on half the storms.

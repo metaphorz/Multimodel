@@ -29,7 +29,9 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "outputs" / "web"
 VARS = ["CP", "Rmax", "VT", "WSP", "CF", "FFP"]
 CATS = ["cat1", "cat3", "cat5"]
-RESPONSES = ["wind", "windmax", "tlc"]
+# The wind responses do not depend on exposure; the loss response does, so it is fit
+# once per exposure model. The viewer maps (response=tlc, exposure=census) -> "tlc_census".
+RESPONSES = ["wind", "windmax", "tlc_uniform", "tlc_census", "tlc_tax"]
 SEED = 0
 # Sobol' Monte-Carlo budget. n=2048 (the original) left the indices drifting by
 # ~0.05 -- as large as the interaction effect itself. Converged to <0.01 here.
@@ -56,7 +58,23 @@ def load_data():
     factors = np.array(rough["factors"], dtype=float)        # marine->land per vertex
     xs = np.array(vuln["xs"], dtype=float)
     mdr = np.array(vuln["mdr"], dtype=float)
-    return grid, powell, powell_kd, factors, land, xs, mdr, inputs
+
+    # Per-vertex insured value, one array per exposure model. The loss response is
+    # value-WEIGHTED (as pctTLC() in analysis.js already is), so an emulator must be
+    # fit per exposure model: value is brutally concentrated (Census Gini 0.84, top
+    # 10% of vertices hold 65% of it), so WHERE the wind lands changes the total loss.
+    # Fitting only Uniform -- as this pipeline used to -- makes every SRC/EPR/Sobol'
+    # number for loss cost silently answer the Uniform question no matter what the
+    # sidebar's Exposure selector says.
+    n_land = int(land.sum())
+    exposures = {"uniform": np.full(n_land, 100_000.0)}
+    for key, fn in (("census", "exposure_census.json"), ("tax", "exposure_tax.json")):
+        p = WEB / fn
+        if p.exists():
+            d = json.loads(p.read_text())
+            vals = d.get("values") or next(v for v in d.values() if isinstance(v, list))
+            exposures[key] = np.array(vals, dtype=float)[land]
+    return grid, powell, powell_kd, factors, land, xs, mdr, inputs, exposures
 
 
 def mdr_at(wind, xs, mdr):
@@ -64,21 +82,28 @@ def mdr_at(wind, xs, mdr):
     return np.interp(wind, xs, mdr, left=mdr[0], right=mdr[-1])
 
 
-def metric_columns(powell, factors, land, xs, mdr, cat, response):
+def metric_columns(powell, factors, land, xs, mdr, cat, response, exposure=None):
     """Per-vector scalar Y: an aggregate over the land GRID POINTS of one vector.
 
     Every response reduces axis 1 (the 682 land vertices), leaving one value per
     input vector -- never an average across vectors. `wind` is the domain-average
     storm, `windmax` the worst-hit vertex, `tlc` the domain total loss.
+
+    A `tlc*` response is value-weighted by `exposure` ($ per land vertex):
+        %TLC(i) = 100 * sum_x MDR(V(i,x)) * exposure(x) / sum_x exposure(x)
+    which reduces to the old 100 * mean(MDR) only when exposure is uniform.
     """
     fields = np.array(powell[cat], dtype=float) * factors[None, :]    # (100, 840)
     landfields = fields[:, land]                                      # (100, n_land)
+    if response.startswith("tlc"):
+        m = mdr_at(landfields, xs, mdr)                               # (100, n_land)
+        e = exposure if exposure is not None else np.ones(m.shape[1])
+        return 100.0 * (m * e[None, :]).sum(axis=1) / e.sum()
     if response == "wind":
         return landfields.mean(axis=1)                               # mean land peak wind
     if response == "windmax":
         return landfields.max(axis=1)                                # worst-hit vertex
-    # %TLC = 100 * mean land MDR  (= TLC / $68.2M exposure)
-    return 100.0 * mdr_at(landfields, xs, mdr).mean(axis=1)
+    raise ValueError(f"unknown response {response!r}")
 
 
 # ---- GPR: fit + extract exact-prediction parameters -----------------------
@@ -225,7 +250,7 @@ def r2(y, yhat):
     return float(1 - ss_res / ss_tot)
 
 
-def sobol_block(field, factors, land, xs, mdr, inputs, cat, response):
+def sobol_block(field, factors, land, xs, mdr, inputs, cat, response, exposure=None):
     """Fit a GPR to one land configuration and return its Sobol' block.
 
     Called once per land configuration so the indices track the viewer's Kaplan-
@@ -233,7 +258,7 @@ def sobol_block(field, factors, land, xs, mdr, inputs, cat, response):
     decomposition -- the exported predictor is still the roughness-only one.
     """
     X = np.array([[r[v] for v in VARS] for r in inputs[cat]], dtype=float)
-    y = metric_columns(field, factors, land, xs, mdr, cat, response)
+    y = metric_columns(field, factors, land, xs, mdr, cat, response, exposure)
     m, s = X.mean(0), X.std(0)
     s[s == 0] = 1.0
     _, gp = fit_gpr((X - m) / s, y)
@@ -257,7 +282,7 @@ def sobol_block(field, factors, land, xs, mdr, inputs, cat, response):
 
 
 def main():
-    grid, powell, powell_kd, factors, land, xs, mdr, inputs = load_data()
+    grid, powell, powell_kd, factors, land, xs, mdr, inputs, exposures = load_data()
     out = {"config": {"model": "powell", "land": "roughness"},
            "vars": VARS, "note": "GPR/NN predictors are fit for the default config "
            "(Powell + roughness); Linear/RSM stays live in the browser. Sobol' indices "
@@ -271,7 +296,9 @@ def main():
         for cat in CATS:
             recs = inputs[cat]
             X = np.array([[r[v] for v in VARS] for r in recs], dtype=float)
-            y = metric_columns(powell, factors, land, xs, mdr, cat, response)
+            # a tlc_* response names its exposure model; wind responses ignore it
+            expo = exposures.get(response.split("_", 1)[-1]) if response.startswith("tlc") else None
+            y = metric_columns(powell, factors, land, xs, mdr, cat, response, expo)
 
             xs_mean, xs_std = X.mean(0), X.std(0)
             xs_std[xs_std == 0] = 1.0
@@ -292,8 +319,8 @@ def main():
 
             # Sobol' for BOTH land configurations, so the viewer's Kaplan-DeMaria
             # toggle selects the matching set instead of hiding the indices entirely.
-            sob = sobol_block(powell, factors, land, xs, mdr, inputs, cat, response)
-            sob_kd = sobol_block(powell_kd, factors, land, xs, mdr, inputs, cat, response)
+            sob = sobol_block(powell, factors, land, xs, mdr, inputs, cat, response, expo)
+            sob_kd = sobol_block(powell_kd, factors, land, xs, mdr, inputs, cat, response, expo)
             S1 = np.array(sob["S1"]); ST = np.array(sob["ST"])
             interaction = np.array(sob["interaction"])
             resolved = np.array(sob["resolved"])

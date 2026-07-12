@@ -97,6 +97,46 @@ function animBuildExtGrid(rec, extraCols) {
 }
 
 // precompute the instantaneous wind field (mph) over the extended domain for each
+// ---- Powell (dynamic) animation frames -----------------------------------
+// One (cat, vector) file is 840 vertices x 73 frames of uint8 = 60 KB. Shipping all
+// 300 would be 18 MB and would stall the UI, so exactly one storm -- the one on
+// screen -- is fetched on demand and cached. This is only workable because the map
+// now shows a single input vector at a time.
+const DYN = { cache: new Map(), inflight: new Set() };
+
+// The frames are product D: Kaplan-DeMaria decay marched through the pressure AND
+// in-PDE z0 land drag. They therefore describe one configuration only; under any
+// other land setting the field on screen is not the field in the file.
+function dynFramesUsable() {
+  if (!state.dynFrames) return false;
+  if (ANIM.mode === "wide") return false;    // extension is off-grid; no data there
+  return document.getElementById("landRoughness").checked &&
+         document.getElementById("landDecay").checked;
+}
+
+function dynFramesWhy() {
+  if (!state.dynFrames) return "dynamic frames not built (run windfield_dynamic_batch.py --frames-only)";
+  if (ANIM.mode === "wide") return "dynamic animation is grid-only — switch to Narrow";
+  return "dynamic animation needs Surface roughness + Kaplan–DeMaria decay (the precomputed field)";
+}
+
+// Returns the Uint8Array for this storm, or null while the fetch is in flight.
+function dynFramesGet(cat, vector) {
+  const key = `${cat}_v${vector}`;
+  if (DYN.cache.has(key)) return DYN.cache.get(key);
+  if (DYN.inflight.has(key)) return null;
+  DYN.inflight.add(key);
+  fetch(`../outputs/web/dyn_frames/${key}.bin`)
+    .then(r => r.ok ? r.arrayBuffer() : Promise.reject(r.status))
+    .then(buf => {
+      DYN.cache.set(key, new Uint8Array(buf));
+      DYN.inflight.delete(key);
+      if (ANIM.active) { ANIM.key = null; animPrecompute(); animRenderFrame(ANIM.i); }
+    })
+    .catch(() => { DYN.cache.set(key, null); DYN.inflight.delete(key); });
+  return null;
+}
+
 // frame; returns false if the selection can't be simulated. Cached on storm key.
 function animPrecompute() {
   const key = animStormKey();
@@ -130,7 +170,40 @@ function animPrecompute() {
     ? sched[Math.max(0, Math.min(schedN, Math.round((t - PHYS.T_MIN) / schedDt)))] : 1;
 
   let fn = null, Z = null, pn = 0, phalf = 0;
-  if (model === "powelldyn") return false;   // peaks-only product; no field to animate
+
+  // ---- Powell (dynamic): play the precomputed time-resolved field ----------
+  // The other models are translation-invariant, so a single storm-relative field can
+  // be advected. The dynamic field is not -- that is the whole point of it -- so its
+  // frames are precomputed per (cat, vector) and fetched lazily, 60 KB at a time.
+  if (model === "powelldyn") {
+    if (!dynFramesUsable()) return false;          // wrong config / wide mode / not loaded
+    const F8 = dynFramesGet(cat, rec.vector);
+    if (!F8) return false;                          // fetch in flight; play() retries
+    const man = state.dynFrames, sc = man.scale, NV = man.n_vertices;
+    const fields = [];
+    for (let i = 0; i < ANIM.frames; i++) {
+      const row = F8.subarray(i * NV, (i + 1) * NV);
+      const Fr = new Float32Array(N);
+      for (let k = 0; k < N; k++) {
+        const g = gi[k];
+        if (g < 0) continue;                        // off-grid: no data (narrow only)
+        // decay is ALREADY marched into the field (product D), so no decayAt() here;
+        // the local exposure factor still applies, exactly as computeWindFor() does
+        let w = row[g] * sc;
+        if (rough && P[k].land) w *= state.roughness.factors[g];
+        Fr[k] = w;
+      }
+      fields.push(Fr);
+    }
+    const peakLive = new Float32Array(N);
+    for (const Fr of fields) for (let k = 0; k < N; k++) if (Fr[k] > peakLive[k]) peakLive[k] = Fr[k];
+    const tgt = (typeof computeWindCached === "function") ? computeWindCached() : null;
+    if (!tgt || typeof tgt === "string") return false;
+    ANIM.fields = fields; ANIM.key = key; ANIM.ext = ext;
+    ANIM.peakLive = peakLive; ANIM.target = tgt;
+    return true;
+  }
+
   if (model === "powell") {
     Z = state.powellField && state.powellField[cat] && state.powellField[cat][vIdx];
     if (!Z) return false;
@@ -216,7 +289,12 @@ function animRenderFrame(i) {
 }
 
 function animEnter() {
-  if (!animPrecompute()) { document.getElementById("simTime").textContent = "unavailable for this selection"; return false; }
+  if (!animPrecompute()) {
+    const dyn = document.getElementById("model").value === "powelldyn";
+    document.getElementById("simTime").textContent =
+      dyn ? dynFramesWhy() : "unavailable for this selection";
+    return false;
+  }
   // draw the moving field on a pane BELOW the grid markers (overlayPane, z 400), so
   // the dynamic dots sit on top of the field and their live recolouring is visible.
   if (!state.map.getPane("animField")) {
