@@ -328,16 +328,69 @@ water), so over low-drag marine surfaces the boundary layer spins up to whatever
 wind balances that prescribed forcing; nothing like a potential-intensity limit,
 ocean-heat feedback, or eyewall replacement can intervene. The extreme values sit
 far above any observed surface wind and should be read as tail artefacts of the
-input distribution, not as forecasts. The four precomputed products
-(\texttt{powell\_dyn\{,\_kd,\_rough,\_kd\_rough\}.json}) cover the
-decay$\times$roughness checkbox states; Powell (dynamic) provides peak footprints
-only (no storm-relative popup series or animation --- the field is no longer
-translation-invariant), and the \textbf{Powell (steady)} option is retained
-unchanged as the reference. The two are labelled \emph{steady} and \emph{dynamic}
-rather than ``PDE'' and ``dynamic'': both solve the same slab boundary-layer PDE,
-and what separates them is whether it is integrated in time.
+input distribution, not as forecasts. The \textbf{Powell (steady)} option is retained unchanged as the
+reference. The two are labelled \emph{steady} and \emph{dynamic} rather than ``PDE''
+and ``dynamic'': both solve the same slab boundary-layer PDE, and what separates them
+is whether it is integrated in time.
 
-\section{Meteorology: Land effect---roughness and decay}
+\paragraph{The four products.} The dynamic model is not one field but \emph{four}. The
+two land checkboxes are not post-hoc multipliers here---each combination is a
+different integration of the PDE---so all four are precomputed and the viewer selects
+among them:
+\begin{center}\small
+\begin{tabular}{llll}
+\toprule
+Roughness & K--D decay & Product & File \\
+\midrule
+off & off & A & \texttt{powell\_dyn.json} \\
+off & on  & B & \texttt{powell\_dyn\_kd.json} \\
+on  & off & C & \texttt{powell\_dyn\_rough.json} \\
+on  & on  & D \emph{(default)} & \texttt{powell\_dyn\_kd\_rough.json} \\
+\bottomrule
+\end{tabular}
+\end{center}
+Decay (B, D) enters through the \emph{pressure} forcing and roughness (C, D) through
+the \emph{in-PDE drag}, as described above. In every case the local exposure factor of
+Section~\ref{sec:landeffect} is still applied afterwards, exactly as for the other
+models. Product~A needs no march at all: under constant marine forcing the dynamic
+solution provably equals the frozen-field translation, so A \emph{is} the converged
+field advected.
+
+\paragraph{The time structure of a dynamic storm.} Each storm is integrated over the
+window $t\in[t_0,t_1]$ with $t_0=-2$\,h and $t_1=\min(24\,\mathrm{h},\,177\,\mathrm{mi}/V_T)$,
+i.e.\ from shortly before landfall until the centre is 60\,mi past the far grid edge.
+Outside that window the field is taken to be the frozen marine translation, and this
+is not a shortcut in either direction: for $t<t_0$ the storm is still offshore and the
+field genuinely \emph{is} marine, and for $t>t_1$ the centre has left the domain, where
+the difference between a decayed and an undecayed field over the grid is negligible.
+The reported peak combines the pre-$t_0$ frozen peak with the peak over the dynamic
+window.
+
+\paragraph{Animation: why it is possible now.} Earlier builds offered the dynamic model
+as \emph{peak footprints only}, with no animation. The obstacle was never the physics
+but the interface: the map could then display a field \emph{aggregated over all 100
+input vectors}, so animating required every storm's full space-time field to be present
+at once---about 105\,MB as JSON, which no browser should be asked to parse.
+
+Two changes removed the obstacle. First, the map now shows exactly \emph{one} input
+vector (Section~\ref{sec:interface}), a decision taken for statistical reasons---the
+mean across vectors is not a quantity anyone wants---and the browser consequently never
+needs more than one storm. Second, the field is stored as \texttt{uint8} at 2\,mph
+resolution rather than JSON: invisible in a contour plot whose narrowest band is 35\,mph
+wide, and a sixfold saving. One storm is then \textbf{840 vertices $\times$ 73 frames
+$=$ 60\,KB}, fetched lazily when it is played---less than several JSON files the viewer
+already loads at startup. The precompute itself is nearly free: the march \emph{already}
+evaluates the surface field at every vertex every minute and discards it to keep the
+running maximum, so retaining it on the 30-minute animation cadence adds no physics, only
+bookkeeping. The frames are clamped to the product's stored peak, since a field cannot
+exceed its own maximum and the animation must settle exactly onto the static footprint
+the map draws.
+
+This is worth stating plainly because the lesson generalises: the performance limit was
+an artefact of a \emph{statistical} choice (aggregating across input vectors) that was
+independently wrong. Fixing the statistics dissolved the interface constraint.
+
+\section{Meteorology: Land effect---roughness and decay}\label{sec:landeffect}
 The storm's interaction with the land is modelled by two \emph{independent},
 combinable toggles: \textbf{Surface roughness} and \textbf{Kaplan--DeMaria
 decay}~\cite{kaplan}. They are checkboxes rather than a single exclusive selector, so all four
@@ -1041,7 +1094,7 @@ dominant parameter varies spatially across the grid.}
 \label{fig:gridsens}
 \end{figure}
 
-\section{Computer science: Interface and reproducibility}
+\section{Computer science: Interface and reproducibility}\label{sec:interface}
 
 \subsection{Design}\label{sec:design}
 Before the interface itself, two diagrams fix the shape of the computation.
