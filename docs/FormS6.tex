@@ -828,7 +828,7 @@ implementation. A statistician, working independently in \textbf{JMP}, exported 
 per-vertex loss-cost table for the Boynton Beach vertex $(\mathrm{ew},\mathrm{ns})=(6,45)$
 ---the $100$ input vectors against $\%\mathrm{LC}$ at that point---fitted JMP's own
 Gaussian-process model, and read off the Sobol' indices its platform derives
-\emph{analytically} from the fitted kernel. Our figures for the same vertex come from a
+\emph{analytically} from the fitted kernel. The Pro Team \& Claude figures for the same vertex come from a
 scikit-learn GPR with the indices estimated by \emph{Monte Carlo} (Saltelli for $S_i$,
 Jansen for $S_{Ti}$, $262{,}144\times3$ samples). Different software, different
 emulator code, different index mathematics:
@@ -838,7 +838,7 @@ emulator code, different index mathematics:
 \toprule
  & \multicolumn{3}{c}{main effect $S_i$} & \multicolumn{3}{c}{total effect $S_{Ti}$}\\
 \cmidrule(lr){2-4}\cmidrule(lr){5-7}
-input & JMP & ours & $\Delta$ & JMP & ours & $\Delta$\\
+input & JMP & P.\,Team \& Claude & $\Delta$ & JMP & P.\,Team \& Claude & $\Delta$\\
 \midrule
 CP        & 0.0098 & 0.0096 & $-0.0002$ & 0.0171 & 0.0170 & $-0.0001$\\
 $R_{\max}$& 0.8216 & 0.8251 & $+0.0035$ & 0.9086 & 0.9100 & $+0.0014$\\
@@ -857,7 +857,7 @@ are numerically zero in both:
 \begin{center}\small
 \begin{tabular}{lrr@{\hskip 2em}lrr}
 \toprule
-pair & JMP & ours & pair & JMP & ours\\
+pair & JMP & P.\,Team & pair & JMP & P.\,Team\\
 \midrule
 $R_{\max}\!\times\!$CF  & 0.0454 & 0.0452 & VT\,$\times$\,CF        & 0.0003 & 0.0004\\
 $R_{\max}\!\times\!$WSP & 0.0257 & 0.0255 & WSP\,$\times$\,FFP      & 0.0001 & 0.0003\\

@@ -682,8 +682,11 @@ function setupHover() {
       if (d < bd) { bd = d; best = i; }
     }
     if (best < 0) return;
-    // when the profiler is in single-point "pick" mode, a click selects the vertex
-    if (typeof profilerState !== "undefined" && profilerState.picking) {
+    // Single-point mode IS the arming. While the profiler is open on that scale, a
+    // click selects the vertex -- every click, including a re-pick -- and the panel
+    // redraws in whatever view is showing (profiler curves or interaction matrix).
+    // No separate "pick" button: choosing the mode is the whole instruction.
+    if (typeof profilerIsPicking === "function" && profilerIsPicking()) {
       profilerPickPoint(best);
       return;
     }

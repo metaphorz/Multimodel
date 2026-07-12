@@ -22,7 +22,7 @@ const analysisState = { mode: null, cache: null, saMethod: "src" };
 const profilerState = {           // metamodel + reference point + view/scale state
   mm: null, ref: null, view: "profiler",      // view: profiler | matrix
   scale: "footprint",             // footprint (metamodel) | point (direct simulation)
-  pt: null, picking: false, marker: null,     // single-point selection (map click)
+  pt: null, marker: null,                     // single-point selection (map click)
   pred: null,                     // active predictor {predict, ymin, ymax, available}
 };
 
@@ -496,7 +496,11 @@ function createPanel(mode) {
     L.DomEvent.disableClickPropagation(el);
     L.DomEvent.disableScrollPropagation(el);
   }
-  el.querySelector(".ap-close").addEventListener("click", () => { el.style.display = "none"; });
+  el.querySelector(".ap-close").addEventListener("click", () => {
+    el.style.display = "none";
+    // closing the profiler ends single-point picking: clicks go back to the popup
+    if (mode === "prof") document.getElementById("map").style.cursor = "";
+  });
   el.addEventListener("mousedown", () => bringFront(el));
   makeDraggable(el, el.querySelector(".ap-header"));
   return { el, body: el.querySelector(".ap-body"), title: el.querySelector(".ap-title") };
@@ -854,15 +858,24 @@ function profilerPredictor() {
   return { available: true, predict, ymin: lo - pad, ymax: hi + pad, direct };
 }
 
+// Is a map click currently a vertex pick? True whenever the Interaction Profiler is
+// open on the Single-point scale -- the mode is the arming, so there is no button and
+// no first-click/re-pick distinction. Clicks fall back to the windfield popup as soon
+// as the panel closes or the scale returns to Footprint.
+function profilerIsPicking() {
+  const p = panels["prof"];
+  return !!(p && p.el.style.display !== "none" && profilerState.scale === "point");
+}
+
 // set the single-point vertex from a map click, drop a crosshair marker, re-render
 function profilerPickPoint(idx) {
   const q = state.grid.points[idx];
   profilerState.pt = { ew: q.ew, ns: q.ns, idx };
-  profilerState.picking = false;
-  document.getElementById("map").style.cursor = "";
   if (profilerState.marker) state.map.removeLayer(profilerState.marker);
   profilerState.marker = L.marker([q.lat, q.lon], { icon: L.divIcon({
     className: "prof-pin", html: "✕", iconSize: [22, 22], iconAnchor: [11, 11] }) }).addTo(state.map);
+  // redraws in whatever view is showing -- so if Interaction matrix is selected, the
+  // matrix for the clicked vertex appears at once, which is the point of clicking.
   buildProfilerDOM();
   // the financial panel's single-point EP shares this vertex — refresh it if open
   if (panels.fin && panels.fin.el.style.display !== "none") drawFinancial();
@@ -895,9 +908,10 @@ function buildProfilerDOM() {
     `<div class="prof-toggle">` +
     `<button class="prof-tab${scale === "footprint" ? " active" : ""}" data-scale="footprint">Footprint mean</button>` +
     `<button class="prof-tab${scale === "point" ? " active" : ""}" data-scale="point">Single point</button>` +
+    // no pick button: in Single-point mode every map click selects the vertex
     (scale === "point"
-      ? `<button class="prof-pick${profilerState.picking ? " active" : ""}" id="profPick">Pick on map</button>` +
-        `<span class="prof-ptlbl">${ptTxt}</span>` : "") +
+      ? `<span class="prof-ptlbl">${profilerState.pt ? "point " + ptTxt
+                                                     : "click a grid point"}</span>` : "") +
     `</div>`;
 
   const srcTxt = scale === "point"
@@ -963,25 +977,16 @@ function wireProfTabs(p) {
   p.body.querySelectorAll(".prof-tab[data-scale]").forEach(b =>
     b.addEventListener("click", () => {
       profilerState.scale = b.dataset.scale;
-      // Choosing "Single point" with no vertex yet ARMS the pick straight away, so the
-      // next map click just selects the vertex -- which is the only thing single-point
-      // mode is for. An explicit mode is needed at all only because a plain click is
-      // already taken (it opens the windfield popup); it should not also cost a button
-      // press. "Pick on map" remains, for CHANGING the vertex afterwards.
-      profilerState.picking = (profilerState.scale === "point" && !profilerState.pt);
+      // Selecting "Single point" IS the instruction: from now on a map click picks the
+      // vertex (every click, not just the first), and the crosshair says so. Leaving the
+      // mode hands clicks back to the windfield popup.
       document.getElementById("map").style.cursor =
-        profilerState.picking ? "crosshair" : "";
+        profilerState.scale === "point" ? "crosshair" : "";
       if (profilerState.scale !== "point" && profilerState.marker) {
         state.map.removeLayer(profilerState.marker); profilerState.marker = null;
       }
       buildProfilerDOM();
     }));
-  const pick = p.body.querySelector("#profPick");
-  if (pick) pick.addEventListener("click", () => {
-    profilerState.picking = !profilerState.picking;
-    document.getElementById("map").style.cursor = profilerState.picking ? "crosshair" : "";
-    pick.classList.toggle("active", profilerState.picking);
-  });
 }
 
 // N×N interaction matrix: cell (r,c) = effect of input c on the response with input
