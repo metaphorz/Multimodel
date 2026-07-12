@@ -254,7 +254,7 @@ def run_batch(cat, bi, recs, idxs, grid, z0_fn, is_land, ew, ns, device):
     march("D", dp_scale, z0_fn, uR, vR, frames=framesD)
 
     if WANT_FRAMES:
-        write_frames(cat, recs, framesD)
+        write_frames(cat, recs, framesD, peaks["D"])
     if FRAMES_ONLY:
         print(f"[{cat} b{bi}] frames done ({time.time()-t_start:.0f}s total; "
               f"peaks left untouched)", flush=True)
@@ -268,14 +268,23 @@ def run_batch(cat, bi, recs, idxs, grid, z0_fn, is_land, ew, ns, device):
     print(f"[{cat} b{bi}] wrote checkpoint ({time.time()-t_start:.0f}s total)", flush=True)
 
 
-def write_frames(cat, recs, framesD):
+def write_frames(cat, recs, framesD, peakD=None):
     """One uint8 file per (cat, vector): 840 vertices x 73 frames, row-major by frame.
 
     Values are stored as mph/FRAME_SCALE so the strongest storms (up to 510 mph) fit
     in a byte; it keeps a storm at 60 KB so the browser can fetch just the one on
     screen. Clipping would be silent data loss, so it is checked, not assumed.
+
+    Frames are clamped to the product-D peak. A field cannot exceed its own maximum,
+    but the frames CAN without this: after the dynamic window closes at t1 they fall
+    back to the frozen-marine base, which carries neither the K&D decay nor the in-PDE
+    drag, so a slow storm still near the grid at t1 shows a few vertices above the
+    decayed peak (measured: 98 cells out of 18.4M, worst 6.9 mph). Clamping keeps the
+    animation consistent with the static footprint the map draws from the same peaks.
     """
     os.makedirs(FRAMES_DIR, exist_ok=True)
+    if peakD is not None:
+        framesD = torch.minimum(framesD, peakD[:, :, None])
     over = int((framesD > FRAME_MAX_MPH).sum())
     if over:
         print(f"  WARNING: {over} frame values exceed {FRAME_MAX_MPH:.0f} mph and "
