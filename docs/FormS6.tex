@@ -69,6 +69,37 @@ uncertainty), \emph{actuarial science} (loss exceedance and financial metrics), 
 \emph{computer science} (the implementation itself)---each of which the tool makes
 swappable or explorable so that visiting modelers can plug in their own components.
 
+\paragraph{Why \emph{this} grid?} The $21\times40$ lattice and its landfall point
+($25.8611^\circ$N, $80.1196^\circ$W) are \emph{specified} by Form S-6, not chosen
+here. It is still worth asking what the specification is buying, and the HURDAT2
+best-track archive (1851--2024; 1{,}991 Atlantic storms, 993 of which reached
+hurricane strength) answers it---though not quite in the way one might expect.
+
+The grid does sit in a hurricane-favoured corridor. Of the 178 hurricanes that have
+crossed Florida at hurricane strength, \textbf{28 ($15.7\%$) passed through the
+$60\times117$\,mi grid rectangle}, which occupies only $3.2\%$ of the state's area---a
+concentration of roughly \textbf{five times} what an equal-area box would catch at
+random.
+
+But it is emphatically \emph{not} the point of maximum hurricane frequency. Using
+HURDAT2's own landfall flags, Florida has recorded 138 hurricane-strength landfalls,
+40 of them on the Atlantic coast; only \textbf{7} fall inside the grid's latitude band.
+Sliding a window of the same height down the east coast, the ROA band ranks
+\textbf{41st of 117} placements: the landfall maximum lies about 48\,mi \emph{south},
+over the Keys and Florida Bay, and catches \textbf{19}---nearly three times as many.
+(Every figure here is reproduced by \texttt{pipeline/analyze\_hurdat2\_grid.py} from
+the vendored best-track archive.)
+
+The placement is therefore best understood as maximising \emph{loss}, which is hazard
+$\times$ \emph{exposure}, rather than hazard alone. The southern maximum is largely
+water and sparsely settled, so its hurricanes strike little insured value; the
+Miami--Fort Lauderdale corridor carries both substantial hazard (the five-fold
+track concentration above) and the largest concentration of insured value in the
+state---value that, as Section~\ref{sec:loss} shows, is itself extraordinarily
+concentrated (Gini $0.84$; the densest $10\%$ of vertices hold $65\%$ of it). We can
+measure the hazard half of that trade directly, as above; the exposure half is an
+inference from the value distribution within the grid, not a statewide comparison.
+
 The processes, methods, and data for this app are all public domain and open in the
 repository. The Pro Team provides this repository using the MIT License, which asserts
 no warranties. There may be inconsistencies or errors. Nothing the pipeline needs

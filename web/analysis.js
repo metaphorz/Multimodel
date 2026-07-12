@@ -820,7 +820,8 @@ function profilerPredictor() {
     return { available: true, predict: mm.predict, ymin: mm.ymin, ymax: mm.ymax };
   }
   if (!profilerState.pt)
-    return { available: false, why: "Pick a point: click “Pick on map”, then a grid vertex." };
+    return { available: false,
+             why: "Select a grid point." };
 
   const resp = responseVar();
   let predict, direct;
@@ -962,8 +963,14 @@ function wireProfTabs(p) {
   p.body.querySelectorAll(".prof-tab[data-scale]").forEach(b =>
     b.addEventListener("click", () => {
       profilerState.scale = b.dataset.scale;
-      profilerState.picking = false;
-      document.getElementById("map").style.cursor = "";
+      // Choosing "Single point" with no vertex yet ARMS the pick straight away, so the
+      // next map click just selects the vertex -- which is the only thing single-point
+      // mode is for. An explicit mode is needed at all only because a plain click is
+      // already taken (it opens the windfield popup); it should not also cost a button
+      // press. "Pick on map" remains, for CHANGING the vertex afterwards.
+      profilerState.picking = (profilerState.scale === "point" && !profilerState.pt);
+      document.getElementById("map").style.cursor =
+        profilerState.picking ? "crosshair" : "";
       if (profilerState.scale !== "point" && profilerState.marker) {
         state.map.removeLayer(profilerState.marker); profilerState.marker = null;
       }
@@ -1349,9 +1356,9 @@ function drawFinancial() {
   // single-point scale needs a picked vertex (shared with the profiler)
   if (finState.scale === "point" && !pPt) {
     p.body.innerHTML = controls +
-      "<p class='note'>Single-point EP: pick a grid vertex first — open the " +
-      "Interaction Profiler, set Scale to Single point, and click “Pick on map”. " +
-      "The financial panel then uses that vertex.</p>";
+      "<p class='note'>Single-point EP: open the Interaction Profiler, set Scale to " +
+      "Single point, and select a grid point. The financial panel then uses that " +
+      "vertex.</p>";
     wireFinControls(p);
     return;
   }
