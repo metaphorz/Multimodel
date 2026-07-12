@@ -41,6 +41,29 @@ FIGURES = [
     # exists to show the OPTIONAL dark theme.
     ("dark_theme",       {"theme": "dark", "model": "powell", "category": "3",
                           "display": "points", "colorBy": "wind"}, None),
+    # These four were hand-captured before this script existed, so "regenerate all"
+    # never touched them and they kept a stale dark theme (and, for anim_approach, the
+    # wide-mode contour gap). Capturing them here makes every figure reproducible.
+    ("ike_map",          {"model": "powell", "category": "5", "colorBy": "ike",
+                          "display": "points"}, None),
+    ("aal_map",          {"model": "powell", "category": "5", "colorBy": "aal",
+                          "display": "points"}, None),
+    # Left panel of the animation figure: WIDE, t = -12 h, the offshore approach.
+    ("anim_approach",    {"model": "holland", "category": "5", "colorBy": "wind",
+                          "display": "points",
+                          "_js": "document.getElementById('simWide').click();"
+                                 "document.getElementById('simPlay').click();"
+                                 "setTimeout(()=>{if(ANIM.playing)"
+                                 "document.getElementById('simPlay').click();"
+                                 "animRenderFrame(0);}, 900);"}, None),
+    # Right panel: NARROW, mid-passage (t = +3 h -> frame (3+12)/0.5 = 30).
+    ("anim_landfall",    {"model": "holland", "category": "5", "colorBy": "wind",
+                          "display": "points",
+                          "_js": "document.getElementById('simNarrow').click();"
+                                 "document.getElementById('simPlay').click();"
+                                 "setTimeout(()=>{if(ANIM.playing)"
+                                 "document.getElementById('simPlay').click();"
+                                 "animRenderFrame(30);}, 900);"}, None),
     ("analysis_src",     {"model": "powell", "_btn": "btnSRC"}, ".analysis-panel"),
     ("analysis_epr",     {"model": "powell", "_btn": "btnEPR"}, ".analysis-panel"),
     # Sobol' view of the Sensitivity panel. An emulator is fit for BOTH land configs,

@@ -43,7 +43,7 @@ try:
     man = drv.execute_script("return window.state ? null : null") or drv.execute_script(
         "return fetch('../outputs/web/dyn_frames.json').then(r=>r.json())")
     log(f"[1] manifest: {man['n_frames']} frames, scale {man['scale']}, "
-        f"{len(man['available'])} storms available")
+        f"counts {man.get('counts')}")
     if man["n_frames"] != 73:
         fails.append(f"expected 73 frames, manifest says {man['n_frames']}")
 
@@ -101,19 +101,33 @@ try:
 
     drv.save_screenshot(os.path.join(HERE, "dyn_anim.png"))
 
-    # gate: turning decay OFF must refuse, with a useful reason (frames are product D)
-    drv.execute_script("""
-        const e=document.getElementById('landDecay'); e.checked=false;
-        e.dispatchEvent(new Event('change'));
-        if (typeof animExit==='function') animExit();
-    """)
-    time.sleep(0.8)
-    drv.find_element(By.ID, "simPlay").click()
-    time.sleep(1.2)
-    why = drv.find_element(By.ID, "simTime").text
-    log(f"[5] decay OFF -> {why!r}")
-    if "roughness" not in why.lower() and "decay" not in why.lower():
-        fails.append(f"gate message unhelpful when config mismatches: {why!r}")
+    # Each land-checkbox state is a DIFFERENT integration of the PDE, so each must
+    # fetch its own product file. Verify the mapping and that frames build for each
+    # product that exists (cat1 has all four).
+    log("[5] land config -> product -> frames build:")
+    for rough, decay, prod in ((False, False, "A"), (False, True, "B"),
+                               (True, False, "C"), (True, True, "D")):
+        drv.execute_script("""
+            const r=document.getElementById('landRoughness'), d=document.getElementById('landDecay');
+            r.checked=arguments[0]; r.dispatchEvent(new Event('change'));
+            d.checked=arguments[1]; d.dispatchEvent(new Event('change'));
+            if (typeof animExit==='function') animExit();
+            ANIM.fields = null; ANIM.key = null;   // else a refused build leaves stale fields
+        """, rough, decay)
+        time.sleep(0.6)
+        got = drv.execute_script("return dynProduct()")
+        if got != prod:
+            fails.append(f"land(rough={rough},decay={decay}) -> product {got}, expected {prod}")
+        have = drv.execute_script("return !!(state.dynFrames.counts||{})[arguments[0]]", prod)
+        drv.find_element(By.ID, "simPlay").click()
+        time.sleep(2.2)
+        if not drv.execute_script("return !!(ANIM.fields)"):
+            drv.find_element(By.ID, "simPlay").click()   # frames now cached
+            time.sleep(1.5)
+        n = drv.execute_script("return ANIM.fields ? ANIM.fields.length : 0")
+        log(f"      rough={int(rough)} decay={int(decay)} -> {got}  built={n} frames  (precomputed: {have})")
+        if have and n != 73:
+            fails.append(f"product {prod} exists but frames did not build ({n})")
 
     errs = [e for e in drv.get_log("browser")
             if e["level"] == "SEVERE" and "favicon" not in e["message"]]

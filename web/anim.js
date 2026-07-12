@@ -104,25 +104,32 @@ function animBuildExtGrid(rec, extraCols) {
 // now shows a single input vector at a time.
 const DYN = { cache: new Map(), inflight: new Set() };
 
-// The frames are product D: Kaplan-DeMaria decay marched through the pressure AND
-// in-PDE z0 land drag. They therefore describe one configuration only; under any
-// other land setting the field on screen is not the field in the file.
+// The dynamic model has FOUR land products, one per checkbox state, each a different
+// field. The frames file is chosen to match, exactly as computeWindFor() chooses the
+// peaks file -- so the animation always plays the field the map is showing.
+//   A neither   B decay only   C roughness only   D both (the default)
+function dynProduct() {
+  const rough = document.getElementById("landRoughness").checked;
+  const decay = document.getElementById("landDecay").checked;
+  return decay ? (rough ? "D" : "B") : (rough ? "C" : "A");
+}
+
 function dynFramesUsable() {
   if (!state.dynFrames) return false;
   if (ANIM.mode === "wide") return false;    // extension is off-grid; no data there
-  return document.getElementById("landRoughness").checked &&
-         document.getElementById("landDecay").checked;
+  const c = state.dynFrames.counts;
+  return !!(c && c[dynProduct()]);           // frames for THIS product were built
 }
 
 function dynFramesWhy() {
-  if (!state.dynFrames) return "dynamic frames not built (run windfield_dynamic_batch.py --frames-only)";
+  if (!state.dynFrames) return "dynamic frames not built (run windfield_dynamic_batch.py --frames-all)";
   if (ANIM.mode === "wide") return "dynamic animation is grid-only — switch to Narrow";
-  return "dynamic animation needs Surface roughness + Kaplan–DeMaria decay (the precomputed field)";
+  return `dynamic frames for this land setting (product ${dynProduct()}) are not built yet`;
 }
 
-// Returns the Uint8Array for this storm, or null while the fetch is in flight.
+// Returns the Uint8Array for this storm+product, or null while the fetch is in flight.
 function dynFramesGet(cat, vector) {
-  const key = `${cat}_v${vector}`;
+  const key = `${cat}_v${vector}_${dynProduct()}`;
   if (DYN.cache.has(key)) return DYN.cache.get(key);
   if (DYN.inflight.has(key)) return null;
   DYN.inflight.add(key);
@@ -254,7 +261,15 @@ function animRenderFrame(i) {
   ANIM.i = Math.max(0, Math.min(ANIM.frames - 1, i));
   const ext = ANIM.ext, F = ANIM.fields[ANIM.i];
   if (state.animContour) { state.map.removeLayer(state.animContour); state.animContour = null; }
-  const thr = WIND_STOPS.map(s => s[0]).filter(v => v > 0);
+  // Keep the ZERO stop in wide mode. The lowest band is 39 mph, and the extension
+  // carries no grid markers, so between the storm's 39-mph radius and the grid edge
+  // there was neither a contour nor a dot -- a blank strip where the wind is real but
+  // simply below the lowest band (measured: 33 mph at ew=-33 while 42 mph at ew=-69
+  // paints). On the grid itself that sub-39 field is still visible, because the dots
+  // are coloured with this same base colour; painting it in the extension too makes
+  // the field read continuously from the eyewall outward instead of stopping dead.
+  const stops = WIND_STOPS.map(s => s[0]);
+  const thr = ANIM.mode === "wide" ? stops : stops.filter(v => v > 0);
   state.animContour = buildContourLayer(ext.grid, F, thr, windColor,
     { lattice: ext.lattice, upsample: ANIM.upsample, fillOpacity: ANIM.fillOpacity, pane: "animField" }).addTo(state.map);
   // dots PAINT the footprint as the storm crosses: value = static_target * phi,
