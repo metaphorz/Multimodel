@@ -390,6 +390,74 @@ This is worth stating plainly because the lesson generalises: the performance li
 an artefact of a \emph{statistical} choice (aggregating across input vectors) that was
 independently wrong. Fixing the statistics dissolved the interface constraint.
 
+\subsection{Is the dynamic model worth its cost?}\label{sec:steadyvsdyn}
+The dynamic model is roughly two orders of magnitude more expensive than the steady
+one. It is therefore fair to ask what it buys, and the honest answer requires first
+disposing of a confound.
+
+\paragraph{Time integration does nothing under constant forcing.} This is not an
+assumption but a measured identity: under constant marine forcing the dynamic march
+reproduces the frozen-field translation \emph{exactly}---$0.0$\,mph at every one of the
+682 land vertices. Nothing evolves because nothing is changing. Time integration can
+therefore only earn its keep through the \emph{coastal transition}, and it does so in
+two ways the steady model is structurally unable to represent:
+\begin{itemize}
+\item \textbf{Decay with a lag.} The steady model applies Kaplan--DeMaria as an
+instantaneous multiplier on a frozen field. The dynamic model drives it through the
+\emph{pressure} forcing, so the wind relaxes toward the decay target with the physical
+boundary-layer lag ($\tau\!\sim\!1$\,h) rather than snapping to it.
+\item \textbf{Drag as a momentum sink.} The steady model applies roughness as a
+post-hoc per-vertex multiplier. The dynamic model puts the $z_0$ drag \emph{inside} the
+PDE, azimuthally asymmetric at landfall---which is what produces the transient
+super-gradient jet described above, and which no per-vertex factor can imitate.
+\end{itemize}
+
+\paragraph{The confound: the steady baseline is not converged.} Before attributing any
+difference to time integration, note that the two models do not share a baseline. The
+production steady solve stops at 800 iterations, whereas the dynamic model begins from
+the true converged equilibrium of the \emph{same} equations. Comparing the two marine
+fields---identical physics, \emph{no} time integration---isolates that gap alone:
+\[
+\begin{array}{lccc}
+ & \text{Cat 1} & \text{Cat 3} & \text{Cat 5}\\\hline
+\text{convergence alone (800-iter} \to \text{converged)} & +4.2\% & +3.6\% & +9.3\%\\
+\text{full steady} \to \text{dynamic (decay + roughness)} & -3.3\% & -4.4\% & +2.7\%
+\end{array}
+\]
+The convergence artefact is \emph{larger than the net difference it is confounded with}.
+The two effects partially cancel: the dynamic model starts stronger because it is
+converged, and the in-PDE drag and lagged decay then pull it back. Any claim that the
+dynamic model is simply ``more accurate'' would be reading a numerical defect as
+physics. The under-convergence of the steady solve is a genuine, separable flaw, and it
+should be fixed on its own terms rather than absorbed into a comparison.
+
+\paragraph{What the dynamic model does change.} With that said, the differences are not
+cosmetic, and they are concentrated exactly where the physics above predicts---in
+\emph{where} and \emph{when} the wind lands, not in its domain average.
+\begin{itemize}
+\item \textbf{The worst-hit vertex moves.} The location of the maximum land wind changes
+in $21$--$38\%$ of storms, by as much as $41.7$\,mi---some fourteen grid cells.
+\item \textbf{The dominant input flips.} For Category~3 \emph{max} wind, the first-order
+Sobol' index of $R_{\max}$ rises from $0.028$ (steady) to $0.597$ (dynamic) while WSP
+falls from $0.761$ to $0.261$. In the steady model the worst-hit point is set by how
+\emph{peaked} the eyewall is; once the field may evolve across land it is set by how
+\emph{big} the storm is. A sensitivity ranking handed to a regulator would name a
+different parameter.
+\item \textbf{Individual storms move by tens of billions.} Under Census exposure the
+Cat~1 ensemble mean barely shifts (\$27.0\,B $\to$ \$24.6\,B), yet single storms swing
+enormously: one falls \$71.4\,B $\to$ \$31.5\,B, another rises \$25.4\,B $\to$
+\$41.5\,B; the median $|\Delta|$ is \$5.3\,B and at Cat~5 it is \$20.1\,B.
+\end{itemize}
+
+\paragraph{The mean hides precisely what the model is for.} The last point is the
+sharpest. Averaged over the 100 input vectors, the dynamic model's effect very nearly
+\emph{cancels}: the increases and the decreases offset, and one would conclude the
+extra computation had bought nothing. Per vector---the quantity that is actually an
+output (Section~\ref{sec:interface})---it is worth tens of billions of dollars on a
+single storm. The ensemble mean is not merely uninformative here; it is the one
+statistic that annihilates the entire effect. That is the statistician's objection to
+averaging across vectors, arriving independently from the meteorology.
+
 \section{Meteorology: Land effect---roughness and decay}\label{sec:landeffect}
 The storm's interaction with the land is modelled by two \emph{independent},
 combinable toggles: \textbf{Surface roughness} and \textbf{Kaplan--DeMaria
