@@ -72,6 +72,7 @@ FRAME_SCALE = 2.0                                     # mph per uint8 unit
 FRAME_MAX_MPH = 255 * FRAME_SCALE                     # 510 mph representable
 WANT_FRAMES = False                                   # set by --frames
 FRAMES_ONLY = False                                   # set by --frames-only
+FRAMES_ALL  = False                                   # set by --frames-all
 
 
 def frame_slots(times):
@@ -189,8 +190,10 @@ def run_batch(cat, bi, recs, idxs, grid, z0_fn, is_land, ew, ns, device):
     if os.path.exists(path) and not FRAMES_ONLY:
         print(f"[{cat} b{bi}] checkpoint exists, skipping", flush=True)
         return
-    if FRAMES_ONLY and all(os.path.exists(os.path.join(FRAMES_DIR, f"{cat}_v{int(r['vector'])}.bin"))
-                           for r in recs):
+    want = ("A", "B", "C", "D") if FRAMES_ALL else ("D",)
+    if FRAMES_ONLY and all(
+            os.path.exists(os.path.join(FRAMES_DIR, f"{cat}_v{int(r['vector'])}_{p}.bin"))
+            for r in recs for p in want):
         print(f"[{cat} b{bi}] frames exist, skipping", flush=True)
         return
     t_start = time.time()
@@ -204,17 +207,29 @@ def run_batch(cat, bi, recs, idxs, grid, z0_fn, is_land, ew, ns, device):
                                   dp_scale=dp_scale, z0_fn=z0, sample_ew=ew,
                                   sample_ns=ns, spinup_iter=SPINUP_ITER)
 
-    # frames for product D (roughness + K&D decay) -- the viewer's default config
-    framesD = (torch.zeros((len(recs), ew.numel(), N_FRAMES), device=device)
-               if WANT_FRAMES else None)
+    # Frame buffers. The marine pass lays the pre-t0 base into framesA; each march
+    # then overwrites its own copy inside [t0, t1]. One buffer per product, because
+    # the viewer's four land-checkbox states map onto four different fields:
+    #   A neither   B decay only   C roughness only   D both (the default)
+    prods = ("A", "B", "C", "D") if FRAMES_ALL else ("D",)
+    frames = ({p: torch.zeros((len(recs), ew.numel(), N_FRAMES), device=device)
+               for p in prods} if WANT_FRAMES else {})
+    framesD = frames.get("D")
 
     # marine spin-up -> product A + V0 -> K&D schedules
     dynM = mkdyn(None, None)
     uM, vM = H.pde_dynamic_spinup_batch(S, dynM)
     speed0 = torch.sqrt((uM*S["erx"] + vM*S["etx"] + S["c_x"])**2
                         + (uM*S["ery"] + vM*S["ety"] + S["c_y"])**2)
-    # the marine pass lays the base layer across the whole window; march D overwrites [t0,t1]
-    peakA, pre_t0, V0 = frozen_marine(speed0, S, recs, hours, ew, ns, device, frames=framesD)
+    # The marine pass lays the base layer across the WHOLE window. For product A that
+    # base IS the answer (no march: the marine field is translation-invariant, so the
+    # dynamic solution equals the frozen one under constant forcing). For B/C/D it is
+    # the pre-t0 lead-in, which each march then overwrites inside [t0, t1].
+    base = frames.get("A") if FRAMES_ALL else framesD
+    peakA, pre_t0, V0 = frozen_marine(speed0, S, recs, hours, ew, ns, device, frames=base)
+    if FRAMES_ALL and frames:
+        for p in ("B", "C", "D"):
+            frames[p].copy_(frames["A"])
     print(f"[{cat} b{bi}] marine spin-up + A done ({time.time()-t_start:.0f}s, "
           f"t1={t1_h:.1f}h, V0 max={float(V0.max()):.1f} mph)", flush=True)
 
@@ -241,21 +256,24 @@ def run_batch(cat, bi, recs, idxs, grid, z0_fn, is_land, ew, ns, device):
         print(f"[{cat} b{bi}] march {tag}: {time.time()-t0:.0f}s, "
               f"peak={float(peaks[tag].max()):.1f} mph", flush=True)
 
-    # Marches B and C exist only to produce the peaks for products B and C, which are
-    # already computed and committed. Frames need product D alone (roughness + K&D,
-    # the viewer's default), so frames-only skips them -- and they are the expensive
-    # ones: measured 400 s (B) and 2701 s (C) against 142 s for the marine pass.
-    if not FRAMES_ONLY:
-        march("B", dp_scale, None, uM.clone(), vM.clone())
+    # Marches B and C produce the peaks for products B and C, which already exist and
+    # are committed -- so plain --frames-only skips them (they are the expensive ones:
+    # 400 s and 2701 s against 142 s for the marine pass). --frames-all runs them
+    # anyway, because their FRAMES do not exist and the viewer needs one field per
+    # land-checkbox state.
+    need_BC = FRAMES_ALL or not FRAMES_ONLY
+    if need_BC:
+        march("B", dp_scale, None, uM.clone(), vM.clone(), frames=frames.get("B"))
     dynR = mkdyn(None, z0_fn)
     uR, vR = H.pde_dynamic_spinup_batch(S, dynR)
-    if not FRAMES_ONLY:
-        march("C", None, z0_fn, uR.clone(), vR.clone())
-    march("D", dp_scale, z0_fn, uR, vR, frames=framesD)
+    if need_BC:
+        march("C", None, z0_fn, uR.clone(), vR.clone(), frames=frames.get("C"))
+    march("D", dp_scale, z0_fn, uR, vR, frames=frames.get("D"))
 
     if WANT_FRAMES:
-        write_frames(cat, recs, framesD, peaks["D"])
-    if FRAMES_ONLY:
+        for p, F in frames.items():
+            write_frames(cat, recs, F, p)
+    if FRAMES_ONLY or FRAMES_ALL:
         print(f"[{cat} b{bi}] frames done ({time.time()-t_start:.0f}s total; "
               f"peaks left untouched)", flush=True)
         return
@@ -268,32 +286,48 @@ def run_batch(cat, bi, recs, idxs, grid, z0_fn, is_land, ew, ns, device):
     print(f"[{cat} b{bi}] wrote checkpoint ({time.time()-t_start:.0f}s total)", flush=True)
 
 
-def write_frames(cat, recs, framesD, peakD=None):
-    """One uint8 file per (cat, vector): 840 vertices x 73 frames, row-major by frame.
+_STORED_PEAKS = {}
+
+
+def stored_peaks(prod, cat):
+    """The peak field the MAP draws, straight from the committed powell_dyn*.json.
+
+    Frames are clamped to this, not to a freshly recomputed peak: the static footprint
+    on screen comes from these files, and an animation that momentarily exceeded the
+    footprint it settles on would be visibly wrong.
+    """
+    if prod not in _STORED_PEAKS:
+        fn = PRODUCTS[prod][0]
+        _STORED_PEAKS[prod] = json.load(open(os.path.join(WEB, fn)))
+    return _STORED_PEAKS[prod][cat]
+
+
+def write_frames(cat, recs, F, prod):
+    """One uint8 file per (product, cat, vector): 840 vertices x 73 frames.
 
     Values are stored as mph/FRAME_SCALE so the strongest storms (up to 510 mph) fit
     in a byte; it keeps a storm at 60 KB so the browser can fetch just the one on
     screen. Clipping would be silent data loss, so it is checked, not assumed.
 
-    Frames are clamped to the product-D peak. A field cannot exceed its own maximum,
-    but the frames CAN without this: after the dynamic window closes at t1 they fall
-    back to the frozen-marine base, which carries neither the K&D decay nor the in-PDE
-    drag, so a slow storm still near the grid at t1 shows a few vertices above the
-    decayed peak (measured: 98 cells out of 18.4M, worst 6.9 mph). Clamping keeps the
-    animation consistent with the static footprint the map draws from the same peaks.
+    Frames are clamped to the product's stored peak. A field cannot exceed its own
+    maximum, but the frames CAN without this: after the dynamic window closes at t1
+    they fall back to the frozen-marine base, which carries neither the K&D decay nor
+    the in-PDE drag, so a slow storm still near the grid at t1 shows a few vertices
+    above the decayed peak (measured on product D: 98 cells of 18.4M, worst 6.9 mph).
     """
     os.makedirs(FRAMES_DIR, exist_ok=True)
-    if peakD is not None:
-        framesD = torch.minimum(framesD, peakD[:, :, None])
-    over = int((framesD > FRAME_MAX_MPH).sum())
+    pk = torch.tensor([stored_peaks(prod, cat)[int(r["vector"]) - 1] for r in recs],
+                      dtype=F.dtype, device=F.device)
+    F = torch.minimum(F, pk[:, :, None])
+    over = int((F > FRAME_MAX_MPH).sum())
     if over:
         print(f"  WARNING: {over} frame values exceed {FRAME_MAX_MPH:.0f} mph and "
               f"were clipped -- raise FRAME_SCALE", flush=True)
-    q = (framesD / FRAME_SCALE).clamp(0.0, 255.0).round().to(torch.uint8).cpu().numpy()
+    q = (F / FRAME_SCALE).clamp(0.0, 255.0).round().to(torch.uint8).cpu().numpy()
     for b, rec in enumerate(recs):
         v = int(rec["vector"])
         # (frames, vertices) so the viewer can slice one frame contiguously
-        q[b].T.tofile(os.path.join(FRAMES_DIR, f"{cat}_v{v}.bin"))
+        q[b].T.tofile(os.path.join(FRAMES_DIR, f"{cat}_v{v}_{prod}.bin"))
 
 
 def assemble(inputs):
@@ -329,10 +363,15 @@ def assemble(inputs):
 
 
 def main():
-    global WANT_FRAMES, FRAMES_ONLY
+    global WANT_FRAMES, FRAMES_ONLY, FRAMES_ALL
     ap = argparse.ArgumentParser()
     ap.add_argument("--validate", action="store_true",
                     help="single-storm batch (cat3[0]) compared against Phase 0 output")
+    ap.add_argument("--frames-all", action="store_true", dest="frames_all",
+                    help="dump animation frames for ALL FOUR land products (A/B/C/D) so "
+                         "every land-checkbox state can be animated. Runs the B and C "
+                         "marches, which --frames-only skips, so it is the long one. "
+                         "Peaks are still left untouched.")
     ap.add_argument("--frames-only", action="store_true", dest="frames_only",
                     help="dump animation frames WITHOUT recomputing peaks: skips the "
                          "B and C marches entirely (their peaks already exist), so only "
@@ -348,7 +387,8 @@ def main():
                     help="cap storms per batch (march cost scales with batch size), "
                          "so the frame output can be validated in minutes")
     args = ap.parse_args()
-    FRAMES_ONLY = args.frames_only
+    FRAMES_ALL = args.frames_all
+    FRAMES_ONLY = args.frames_only or FRAMES_ALL
     WANT_FRAMES = args.frames or FRAMES_ONLY
     os.makedirs(CKPT, exist_ok=True)
     device = H.device_select()
@@ -404,24 +444,35 @@ def main():
 
 
 def write_frame_manifest():
-    """Tell the viewer the frame geometry and which storms are available."""
+    """Tell the viewer the frame geometry and which (product, storm) files exist.
+
+    Products map onto the viewer's two land checkboxes:
+        A  neither            (marine)
+        B  Kaplan-DeMaria decay only
+        C  surface roughness only
+        D  both  <- the viewer default
+    """
     have = sorted(f for f in os.listdir(FRAMES_DIR) if f.endswith(".bin")) \
         if os.path.isdir(FRAMES_DIR) else []
+    byprod = {}
+    for f in have:
+        byprod.setdefault(f.rsplit("_", 1)[-1][:-4], []).append(f)
     man = {
-        "product": "D (surface roughness + Kaplan-DeMaria decay)",
+        "products": {k: PRODUCTS[k][1] for k in ("A", "B", "C", "D")},
+        "land_map": {"neither": "A", "decay": "B", "roughness": "C", "both": "D"},
         "dtype": "uint8", "unit": "mph", "scale": FRAME_SCALE,   # mph = byte * scale
         "n_vertices": 840, "n_frames": N_FRAMES,
         "t_min": T_MIN, "t_max": T_MAX, "dt": FRAME_DT,
         "layout": "frame-major: frame f occupies bytes [f*840, (f+1)*840)",
-        "file": "dyn_frames/{cat}_v{vector}.bin",
-        "available": have,
-        "note": "Outside the dynamic window [t0, t1] the frames carry the frozen "
-                "marine translation: before t0 the storm is offshore and the field "
-                "genuinely is marine; after t1 it is 60+ mi past the grid edge, where "
-                "the marine/decayed distinction is negligible.",
+        "file": "dyn_frames/{cat}_v{vector}_{product}.bin",
+        "counts": {k: len(v) for k, v in sorted(byprod.items())},
+        "note": "Frames are clamped to the product's stored peak. Outside the dynamic "
+                "window [t0, t1] they carry the frozen marine translation: before t0 the "
+                "storm is offshore and the field genuinely IS marine; after t1 it is 60+ "
+                "mi past the grid edge, where the marine/decayed distinction is negligible.",
     }
     json.dump(man, open(os.path.join(WEB, "dyn_frames.json"), "w"))
-    print(f"wrote dyn_frames.json ({len(have)} storms)", flush=True)
+    print(f"wrote dyn_frames.json ({man['counts']})", flush=True)
 
 
 if __name__ == "__main__":
