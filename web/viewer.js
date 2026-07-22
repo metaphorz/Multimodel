@@ -106,7 +106,12 @@ function windColor(mph) {
 
 // ---- loss (vulnerability curve) ------------------------------------------
 const EXPOSURE_VALUE = 100000;   // $ per land vertex, Uniform model (ROA p.186)
-const GUST_FACTOR = 1.0;         // peak surface wind -> 3-sec gust input (adjustable)
+// 10-min mean surface wind -> peak 3-s gust, the basis the damage curve expects.
+// G1 (10min->max 1-min) * G2 (max 1-min->3-s) = 1.1 * 1.3 = 1.43, per the order-of-
+// operations review (2026-07-15; outputs/order_of_operations.png). The decay is applied
+// on the 1-min sustained wind upstream (windfield_grid.py); this factor finishes the
+// conversion. Land constants for now; z0-dependent gust (water << land) is the refinement.
+const GUST_FACTOR = 1.43;        // = G_10MIN_1MIN * G_1MIN_3S in windfield_grid.py
 
 // ---- exposure model ------------------------------------------------------
 // Uniform: one $100k home at every land vertex. Census: aggregate ACS home value
@@ -211,28 +216,27 @@ function lossColor(mdr) {
 // Returns a Float64Array over all grid points ($), or "kd-pending"/null if no field.
 function computePointAAL(model) {
   if (!state.inputs || !state.vuln) return null;
-  const cats = [1, 3, 5], pts = state.grid.points, N = pts.length;
+  const pts = state.grid.points, N = pts.length;
   const ded = finState.ded, lim = finState.lim;
+  const lambda = finState.lambda || 0;         // single annual landfall rate (editable)
   const exp = new Float64Array(N);
   for (let i = 0; i < N; i++) exp[i] = pts[i].land ? exposureAt(i) : 0;
   const aal = new Float64Array(N);
-  for (const c of cats) {
-    const rate = finState.rates[c] || 0;
-    if (rate === 0) continue;
-    const recs = state.inputs["cat" + c], nv = recs.length;
-    const sum = new Float64Array(N);
-    for (let v = 0; v < nv; v++) {
-      const w = computeWindFor(model, "cat" + c, v);
-      if (!w || typeof w === "string") return typeof w === "string" ? w : null;
-      for (let i = 0; i < N; i++) {
-        if (exp[i] === 0) continue;
-        let net = Math.max(mdrAt(w[i]) * exp[i] - ded, 0);
-        if (lim != null) net = Math.min(net, lim);
-        sum[i] += net;
-      }
+  if (lambda === 0) return aal;
+  // Lumped design: AAL(x) = lambda * mean_i[ net loss at vertex x over the 200 storms ].
+  const recs = state.inputs[GROUP], nv = recs.length;
+  const sum = new Float64Array(N);
+  for (let v = 0; v < nv; v++) {
+    const w = computeWindFor(model, GROUP, v);
+    if (!w || typeof w === "string") return typeof w === "string" ? w : null;
+    for (let i = 0; i < N; i++) {
+      if (exp[i] === 0) continue;
+      let net = Math.max(mdrAt(w[i]) * exp[i] - ded, 0);
+      if (lim != null) net = Math.min(net, lim);
+      sum[i] += net;
     }
-    for (let i = 0; i < N; i++) aal[i] += rate * sum[i] / nv;
   }
+  for (let i = 0; i < N; i++) aal[i] += lambda * sum[i] / nv;
   return aal;
 }
 
@@ -276,7 +280,7 @@ function computePointIKE(model) {
       field[i] = ikeMetrics(powellTimeSeries(pf, pts[i], rec, { rough, decay }, i)).integ;
     }
   } else {
-    const B = quantileToB(rec.WSP);
+    const B = recB(rec);                     // constrained design supplies B directly
     const sched = decay ? intensitySchedule(stormV0(model, rec, B), rec.VT, pts) : null;
     for (let i = 0; i < N; i++) {
       if (!pts[i].land) continue;
@@ -348,10 +352,16 @@ function renderLegend(mode) {
     `<div class="lg"><span style="background:${col}"></span>&ge; ${thr} mph</div>`).join("");
 }
 
+// GROUP ("all", the single lumped-design population key) is declared in analysis.js,
+// which loads first and references it at top level. Holland B is supplied directly per
+// storm (rec.B); recB() falls back to the legacy WSP->B quantile mapping only when B is
+// absent (old design).
+const recB = (rec) => (rec && rec.B != null) ? rec.B : quantileToB(rec.WSP);
+
 // ---- current input vector + wind field -----------------------------------
 function currentSelection() {
   const model = document.getElementById("model").value;
-  const cat = "cat" + document.getElementById("category").value;
+  const cat = GROUP;
   const vIdx = parseInt(document.getElementById("vector").value, 10) - 1;
   const rec = state.inputs ? state.inputs[cat][vIdx] : null;
   return { model, cat, vIdx, rec };
@@ -360,8 +370,7 @@ function currentSelection() {
 // label + unit + decimals for each input-vector parameter (order = display order)
 const VEC_FIELDS = [
   ["CP", "CP", "mb", 1], ["FFP", "FFP", "mb", 1], ["Rmax", "Rmax", "mi", 1],
-  ["VT", "VT", "mph", 1], ["CF", "CF", "", 3], ["WSP", "WSP", "", 3],
-  ["Quantile", "Quantile", "", 3],
+  ["VT", "VT", "mph", 1], ["CF", "CF", "", 3], ["B", "B", "", 2],
 ];
 
 // thin horizontal strip showing the selected vector's parameters. Single-vector
@@ -508,7 +517,7 @@ function downloadGridPointCsv(idx) {
   const { model, cat } = currentSelection();
   const recs = state.inputs[cat] || [];
   const pt = state.grid.points[idx];
-  const cols = ["CP", "Rmax", "VT", "WSP", "CF", "FFP"];
+  const cols = ["CP", "Rmax", "VT", "B", "CF", "FFP"];
   const totalExp = totalExposure();
   const rows = [[...cols, "MaxWind_mph", "%LC", "%TLC"].join(",")];
   for (let v = 0; v < recs.length; v++) {
@@ -640,7 +649,7 @@ function pointInfoHTML(i) {
   const params = rec
     ? `<hr>CP ${rec.CP} mb &middot; Rmax ${rec.Rmax} mi<br>` +
       `VT ${rec.VT} mph &middot; FFP ${rec.FFP} mb<br>` +
-      `CF ${rec.CF} &middot; WSP ${rec.WSP} (B=${quantileToB(rec.WSP).toFixed(2)})`
+      `CF ${rec.CF} &middot; B ${recB(rec).toFixed(2)}`
     : "";
   return `${wtxt}(${p.ew}, ${p.ns}) mi<br>${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}<br>` +
          `${p.land ? "land" : "water"}${p.place ? " &middot; " + p.place : ""}${rtxt}${params}`;
@@ -826,8 +835,8 @@ function updateField() {
               `${currentSelection().cat.toUpperCase()} ` +
               `v${document.getElementById("vector").value}`;
   if (aalMode && aal) {
-    const rateTag = `λ ${finState.rates[1]}/${finState.rates[3]}/${finState.rates[5]} per yr`;
-    info.innerHTML = `${model.charAt(0).toUpperCase() + model.slice(1)} · AAL (all cats) · ${rateTag}` +
+    const rateTag = `λ ${finState.lambda} per yr`;
+    info.innerHTML = `${model.charAt(0).toUpperCase() + model.slice(1)} · AAL · ${rateTag}` +
       `<br>Domain AAL over ${n} land pts <b>${fmtMoney(aalTotal)}/yr</b>` +
       `<br>max <b>${fmtMoney(state.aalMax)}/yr</b> · exposure ${exposureMode()}`;
   } else if (aalMode && aalPending) {
@@ -876,7 +885,7 @@ function updateField() {
 
 // ---- controls ------------------------------------------------------------
 function wireControls() {
-  ["model", "category", "colorBy", "bdist", "display", "exposureModel", "damageModel"].forEach(id =>
+  ["model", "colorBy", "bdist", "display", "exposureModel", "damageModel"].forEach(id =>
     document.getElementById(id).addEventListener("change", () => {
       if (id === "bdist") bParamInputs(document.getElementById("bdist").value);
       if (id === "model") syncBDistEnabled();
@@ -922,39 +931,56 @@ function syncBDistEnabled() {
 }
 
 // ---- init ----------------------------------------------------------------
+// Active design. The tool now runs on the CONSTRAINED lumped n=200 design; design-
+// dependent files carry a "_constrained" suffix (see pipeline). Shared, design-agnostic
+// files (grid, roughness, exposure, vulnerability) have no suffix. DF() maps a base name
+// to its active-design variant so the whole data layer switches from one constant.
+const DESIGN_SUFFIX = "_constrained";
+const DF = (name) => name.replace(".json", DESIGN_SUFFIX + ".json");
+
 async function init() {
   wireControls();
   try {
     // pipeline-regenerated data: never serve a stale cached copy
     const NC = { cache: "no-store" };
-    state.grid = await (await fetch("../outputs/web/grid.json", NC)).json();
-    state.inputs = await (await fetch("../outputs/web/inputs.json", NC)).json();
+    state.grid = await (await fetch("../outputs/web/grid.json", NC)).json();          // shared
+    state.inputs = await (await fetch(`../outputs/web/${DF("inputs.json")}`, NC)).json();
     try { state.roughness = await (await fetch("../outputs/web/roughness.json", NC)).json(); }
-    catch (e) { state.roughness = null; }
+    catch (e) { state.roughness = null; }   // shared
     try { state.exposure = await (await fetch("../outputs/web/exposure_census.json", NC)).json(); }
-    catch (e) { state.exposure = null; }   // Census exposure (ACS); Uniform works without it
+    catch (e) { state.exposure = null; }   // Census exposure (ACS); shared
     try { state.exposureTax = await (await fetch("../outputs/web/exposure_tax.json", NC)).json(); }
-    catch (e) { state.exposureTax = null; }  // Tax Roll exposure (FL DOR structure value)
-    try { state.powellKd = await (await fetch("../outputs/web/powell_kd.json", NC)).json(); }
-    catch (e) { state.powellKd = null; }   // generated after the UA run
-    try { state.powellField = await (await fetch("../outputs/web/powell_field.json", NC)).json(); }
-    catch (e) { state.powellField = null; }  // generated after the UA run
-    try { state.powellUa = await (await fetch("../outputs/web/powell_ua.json", NC)).json(); }
-    catch (e) { state.powellUa = null; }     // faithful EPR (Option 1)
+    catch (e) { state.exposureTax = null; }  // Tax Roll exposure (FL DOR); shared
+    try { state.powellKd = await (await fetch(`../outputs/web/${DF("powell_kd.json")}`, NC)).json(); }
+    catch (e) { state.powellKd = null; }
+    try { state.powellField = await (await fetch(`../outputs/web/${DF("powell_field.json")}`, NC)).json(); }
+    catch (e) { state.powellField = null; }
+    // Faithful (Option 1) EPR needs the ROA's one-at-a-time UA worksheets, which exist
+    // ONLY for the legacy 3-category design. The constrained lumped n=200 design is a
+    // single dependence-sampled (CP-RMW / B-RMW) population with no OAT sheets, so a
+    // faithful variance-share EPR isn't defined there; the EPR panel uses its built-in
+    // SRC^2 fallback (Option 2), and Shapley is the dependence-aware SA method. Skip the
+    // fetch under the constrained design to avoid a spurious 404.
+    if (DESIGN_SUFFIX === "") {
+      try { state.powellUa = await (await fetch("../outputs/web/powell_ua.json", NC)).json(); }
+      catch (e) { state.powellUa = null; }   // faithful EPR (Option 1), legacy design only
+    } else {
+      state.powellUa = null;                 // constrained design -> EPR = SRC^2 (Option 2)
+    }
     // dynamic Powell products (windfield_dynamic_batch.py); optional
     for (const [k, fn] of [["powellDyn", "powell_dyn"], ["powellDynKd", "powell_dyn_kd"],
                            ["powellDynRough", "powell_dyn_rough"],
                            ["powellDynKdRough", "powell_dyn_kd_rough"]]) {
-      try { state[k] = await (await fetch(`../outputs/web/${fn}.json`, NC)).json(); }
+      try { state[k] = await (await fetch(`../outputs/web/${DF(fn + ".json")}`, NC)).json(); }
       catch (e) { state[k] = null; }
     }
     try { state.vuln = await (await fetch("../outputs/web/vulnerability.json", NC)).json(); }
-    catch (e) { state.vuln = null; }         // MDR vs wind (loss)
-    try { state.metamodels = await (await fetch("../outputs/web/metamodels.json", NC)).json(); }
-    catch (e) { state.metamodels = null; }   // Phase B: precomputed GPR + NN (default config)
+    catch (e) { state.vuln = null; }         // MDR vs wind (loss); shared
+    try { state.metamodels = await (await fetch(`../outputs/web/${DF("metamodels.json")}`, NC)).json(); }
+    catch (e) { state.metamodels = null; }   // Phase B: precomputed GPR + NN + Shapley
     // Manifest only (a few KB). The frame files themselves are fetched one storm at a
     // time by anim.js -- 18 MB of them exist, and eager-loading would stall the UI.
-    try { state.dynFrames = await (await fetch("../outputs/web/dyn_frames.json", NC)).json(); }
+    try { state.dynFrames = await (await fetch(`../outputs/web/${DF("dyn_frames.json")}`, NC)).json(); }
     catch (e) { state.dynFrames = null; }    // dynamic-Powell animation frames
     buildMap();
     setupHover();
@@ -967,14 +993,14 @@ async function init() {
     }
     // powell.json may still be precomputing; load if present
     try {
-      state.powell = await (await fetch("../outputs/web/powell.json", NC)).json();
+      state.powell = await (await fetch(`../outputs/web/${DF("powell.json")}`, NC)).json();
     } catch (e) { state.powell = null; }
     // Holland/Willoughby are precomputed too (pipeline/precompute_live.py) so model
     // switches are instant lookups instead of a ~13s live recompute.
     for (const m of ["holland", "willoughby"]) {
-      try { state[m] = await (await fetch(`../outputs/web/${m}.json`, NC)).json(); }
+      try { state[m] = await (await fetch(`../outputs/web/${DF(m + ".json")}`, NC)).json(); }
       catch (e) { state[m] = null; }
-      try { state[m + "Kd"] = await (await fetch(`../outputs/web/${m}_kd.json`, NC)).json(); }
+      try { state[m + "Kd"] = await (await fetch(`../outputs/web/${DF(m + "_kd.json")}`, NC)).json(); }
       catch (e) { state[m + "Kd"] = null; }
     }
     updateField();

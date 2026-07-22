@@ -47,6 +47,11 @@ from windfield_dynamic import (  # noqa: E402
 WEB = os.path.join(ROOT, "outputs", "web")
 CKPT = os.path.join(ROOT, "outputs", "dynamic", "precompute")
 FRAMES_DIR = os.path.join(ROOT, "outputs", "web", "dyn_frames")
+# Input/manifest paths and the per-checkpoint/frame dirs are module globals so the
+# --constrained switch (in main) can point the whole run at the lumped design's own
+# file set, leaving the legacy cat1/cat3/cat5 dynamic products in place during migration.
+INPUTS_JSON = os.path.join(WEB, "inputs.json")
+MANIFEST_JSON = os.path.join(WEB, "dyn_frames.json")
 BATCH = 25
 T_CHUNK = 120        # timesteps per chunked frozen-sampling / CF-conversion call
 
@@ -73,6 +78,7 @@ FRAME_MAX_MPH = 255 * FRAME_SCALE                     # 510 mph representable
 WANT_FRAMES = False                                   # set by --frames
 FRAMES_ONLY = False                                   # set by --frames-only
 FRAMES_ALL  = False                                   # set by --frames-all
+FULL        = False                                   # set by --full (peaks + all frames, one march)
 
 
 def frame_slots(times):
@@ -107,7 +113,9 @@ PRODUCTS = {
 def storm_batch(recs):
     return {
         "dp_hpa": [float(r["FFP"]) - float(r["CP"]) for r in recs],
-        "B": [wsp_to_B(r["WSP"]) for r in recs],
+        # Holland B direct from the constrained design (Powell Eq.7); legacy path maps a
+        # WSP quantile. Same bypass as windfield_grid.make_args.
+        "B": [float(r["B"]) if "B" in r else wsp_to_B(r["WSP"]) for r in recs],
         "rmax_core_km": [float(r["Rmax"]) * MILE_M / 1000.0 for r in recs],
         "speed_mph": [float(r["VT"]) for r in recs],
     }
@@ -184,7 +192,11 @@ def frozen_marine(speed0, S, recs, hours, ew, ns, device, frames=None):
 
 
 def run_batch(cat, bi, recs, idxs, grid, z0_fn, is_land, ew, ns, device):
-    path = os.path.join(CKPT, f"{cat}_b{bi}.json")
+    # Checkpoint is named by the batch's FIRST vector, not the batch index, so that
+    # independent subset runs (e.g. the 155 cheap storms now, the expensive tail one at a
+    # time later) never collide -- each storm belongs to exactly one batch and vectors are
+    # unique. assemble() globs all of them and merges by the stored per-storm indices.
+    path = os.path.join(CKPT, f"{cat}_v{int(recs[0]['vector'])}.json")
     # In frames-only mode the peaks are NOT recomputed -- they already exist and are
     # committed -- so an existing checkpoint is expected and must not short-circuit us.
     if os.path.exists(path) and not FRAMES_ONLY:
@@ -211,7 +223,7 @@ def run_batch(cat, bi, recs, idxs, grid, z0_fn, is_land, ew, ns, device):
     # then overwrites its own copy inside [t0, t1]. One buffer per product, because
     # the viewer's four land-checkbox states map onto four different fields:
     #   A neither   B decay only   C roughness only   D both (the default)
-    prods = ("A", "B", "C", "D") if FRAMES_ALL else ("D",)
+    prods = ("A", "B", "C", "D") if (FRAMES_ALL or FULL) else ("D",)
     frames = ({p: torch.zeros((len(recs), ew.numel(), N_FRAMES), device=device)
                for p in prods} if WANT_FRAMES else {})
     framesD = frames.get("D")
@@ -225,9 +237,9 @@ def run_batch(cat, bi, recs, idxs, grid, z0_fn, is_land, ew, ns, device):
     # base IS the answer (no march: the marine field is translation-invariant, so the
     # dynamic solution equals the frozen one under constant forcing). For B/C/D it is
     # the pre-t0 lead-in, which each march then overwrites inside [t0, t1].
-    base = frames.get("A") if FRAMES_ALL else framesD
+    base = frames.get("A") if (FRAMES_ALL or FULL) else framesD
     peakA, pre_t0, V0 = frozen_marine(speed0, S, recs, hours, ew, ns, device, frames=base)
-    if FRAMES_ALL and frames:
+    if (FRAMES_ALL or FULL) and frames:
         for p in ("B", "C", "D"):
             frames[p].copy_(frames["A"])
     print(f"[{cat} b{bi}] marine spin-up + A done ({time.time()-t_start:.0f}s, "
@@ -270,10 +282,20 @@ def run_batch(cat, bi, recs, idxs, grid, z0_fn, is_land, ew, ns, device):
         march("C", None, z0_fn, uR.clone(), vR.clone(), frames=frames.get("C"))
     march("D", dp_scale, z0_fn, uR, vR, frames=frames.get("D"))
 
+    if FULL:
+        # Dissipative constraint (same invariant assemble() enforces): the roughness
+        # products cannot exceed their no-roughness bounds, C<=A and D<=B per vertex.
+        # Apply it to the batch peaks BEFORE clamping the frames to them, so the
+        # animation settles onto exactly the constrained static footprint.
+        for rk, bk in (("C", "A"), ("D", "B")):
+            if rk in peaks and bk in peaks:
+                peaks[rk] = torch.minimum(peaks[rk], peaks[bk])
     if WANT_FRAMES:
         for p, F in frames.items():
-            write_frames(cat, recs, F, p)
-    if FRAMES_ONLY or FRAMES_ALL:
+            # FULL clamps to the peaks computed in THIS batch (no committed products yet);
+            # frames-only/-all clamp to the already-committed products via stored_peaks().
+            write_frames(cat, recs, F, p, peak_rows=(peaks[p] if FULL else None))
+    if (FRAMES_ONLY or FRAMES_ALL) and not FULL:
         print(f"[{cat} b{bi}] frames done ({time.time()-t_start:.0f}s total; "
               f"peaks left untouched)", flush=True)
         return
@@ -302,22 +324,27 @@ def stored_peaks(prod, cat):
     return _STORED_PEAKS[prod][cat]
 
 
-def write_frames(cat, recs, F, prod):
+def write_frames(cat, recs, F, prod, peak_rows=None):
     """One uint8 file per (product, cat, vector): 840 vertices x 73 frames.
 
     Values are stored as mph/FRAME_SCALE so the strongest storms (up to 510 mph) fit
     in a byte; it keeps a storm at 60 KB so the browser can fetch just the one on
     screen. Clipping would be silent data loss, so it is checked, not assumed.
 
-    Frames are clamped to the product's stored peak. A field cannot exceed its own
-    maximum, but the frames CAN without this: after the dynamic window closes at t1
-    they fall back to the frozen-marine base, which carries neither the K&D decay nor
-    the in-PDE drag, so a slow storm still near the grid at t1 shows a few vertices
-    above the decayed peak (measured on product D: 98 cells of 18.4M, worst 6.9 mph).
+    Frames are clamped to the product's peak. A field cannot exceed its own maximum,
+    but the frames CAN without this: after the dynamic window closes at t1 they fall
+    back to the frozen-marine base, which carries neither the K&D decay nor the in-PDE
+    drag, so a slow storm still near the grid at t1 shows a few vertices above the
+    decayed peak (measured on product D: 98 cells of 18.4M, worst 6.9 mph). The clamp
+    target is `peak_rows` (the peaks just computed in this batch, --full mode) when
+    given, else the committed product read by stored_peaks() (frames-only/-all).
     """
     os.makedirs(FRAMES_DIR, exist_ok=True)
-    pk = torch.tensor([stored_peaks(prod, cat)[int(r["vector"]) - 1] for r in recs],
-                      dtype=F.dtype, device=F.device)
+    if peak_rows is not None:
+        pk = peak_rows.to(dtype=F.dtype, device=F.device)          # (n_storms, 840)
+    else:
+        pk = torch.tensor([stored_peaks(prod, cat)[int(r["vector"]) - 1] for r in recs],
+                          dtype=F.dtype, device=F.device)
     F = torch.minimum(F, pk[:, :, None])
     over = int((F > FRAME_MAX_MPH).sum())
     if over:
@@ -331,39 +358,69 @@ def write_frames(cat, recs, F, prod):
 
 
 def assemble(inputs):
-    ok = True
+    """Merge ALL checkpoints in CKPT into the product files, by per-storm index.
+
+    Glob-based and incremental: it reads whatever `{cat}_v*.json` checkpoints exist and
+    fills each storm's slot, so a partial run (e.g. only the 155 cheap storms) writes
+    valid products with the not-yet-run storms left as null, and a later run of the
+    remaining storms simply re-assembles to fill them in. Reports coverage per group.
+    """
+    import glob
+    groups = [k for k, v in inputs.items()
+              if isinstance(v, list) and v and isinstance(v[0], dict)]
     prods = {k: {"unit": "mph", "note": note,
                  "grid_note": f"rmin={DYN_RMIN_KM}km Nphi={DYN_NPHI} dyn window "
                               f"t0={T0_H}h; scheme: corrected Coriolis + upwind-r",
-                 "cat1": [None]*100, "cat3": [None]*100, "cat5": [None]*100}
+                 **{g: [None] * len(inputs[g]) for g in groups}}
              for k, (fn, note) in PRODUCTS.items()}
     failures = []
-    for cat in ("cat1", "cat3", "cat5"):
-        for bi in range(100 // BATCH + (1 if 100 % BATCH else 0)):
-            path = os.path.join(CKPT, f"{cat}_b{bi}.json")
-            if not os.path.exists(path):
-                print(f"missing checkpoint {path}; not assembling", flush=True)
-                ok = False
-                continue
-            ck = json.load(open(path))
-            failures += ck["failures"]
-            for k in PRODUCTS:
-                for row, idx in zip(ck["peaks"][k], ck["indices"]):
-                    prods[k][cat][idx] = row
-    if not ok:
-        return
+    filled = {g: 0 for g in groups}
+    for path in sorted(glob.glob(os.path.join(CKPT, "*_v*.json"))):
+        ck = json.load(open(path))
+        cat = ck["cat"]
+        if cat not in prods[next(iter(PRODUCTS))]:
+            continue
+        failures += ck.get("failures", [])
+        for k in PRODUCTS:
+            for row, idx in zip(ck["peaks"][k], ck["indices"]):
+                if prods[k][cat][idx] is None:
+                    filled[cat] += 1 if k == next(iter(PRODUCTS)) else 0
+                prods[k][cat][idx] = row
+
+    # PHYSICAL CONSTRAINT: surface roughness (drag) is DISSIPATIVE, so the roughness
+    # products cannot exceed their no-roughness counterparts at any vertex -- C ("rough")
+    # <= A ("marine") and D ("kd_rough") <= B ("kd"). Enforce it here to remove residual
+    # numerical overshoots at the under-resolved tight eyewall and domain boundaries (a
+    # milder remnant of the instability the MUSCL azimuthal scheme fixed; the extreme
+    # tight-eye storms otherwise show a spurious in-PDE-roughness spike deep inland / at
+    # the far edge where drag physically can only slow the wind). This does NOT touch the
+    # marine/K-D products (A, B) nor the dynamic-vs-frozen difference (B may exceed A).
+    _CONSTRAIN = [("C", "A"), ("D", "B")]   # (roughness product, its no-roughness bound)
+    for rough_k, base_k in _CONSTRAIN:
+        if rough_k in prods and base_k in prods:
+            for g in groups:
+                for i, (rr, bb) in enumerate(zip(prods[rough_k][g], prods[base_k][g])):
+                    if rr is not None and bb is not None:
+                        prods[rough_k][g][i] = [min(a, b) for a, b in zip(rr, bb)]
+
     for k, (fn, _) in PRODUCTS.items():
         path = os.path.join(WEB, fn)
         json.dump(prods[k], open(path, "w"))
-        print(f"Wrote {path} ({os.path.getsize(path)/1e6:.2f} MB)", flush=True)
-    if failures:
-        print(f"WARNING: {len(failures)} storm/variant failures: {failures}", flush=True)
-    else:
-        print("No NaN failures.", flush=True)
+    for g in groups:
+        n = len(inputs[g])
+        missing = [i + 1 for i in range(n) if prods[next(iter(PRODUCTS))][g][i] is None]
+        tag = "COMPLETE" if not missing else f"PARTIAL: {len(missing)} of {n} still null"
+        print(f"Assembled {g}: {filled[g]}/{n} filled -- {tag}", flush=True)
+        if missing and len(missing) <= 60:
+            print(f"  missing vectors: {missing}", flush=True)
+    for k, (fn, _) in PRODUCTS.items():
+        print(f"Wrote {os.path.join(WEB, fn)} "
+              f"({os.path.getsize(os.path.join(WEB, fn))/1e6:.2f} MB)", flush=True)
+    print(f"NaN failures: {len(failures)}" + (f" {failures}" if failures else ""), flush=True)
 
 
 def main():
-    global WANT_FRAMES, FRAMES_ONLY, FRAMES_ALL
+    global WANT_FRAMES, FRAMES_ONLY, FRAMES_ALL, FULL
     ap = argparse.ArgumentParser()
     ap.add_argument("--validate", action="store_true",
                     help="single-storm batch (cat3[0]) compared against Phase 0 output")
@@ -379,21 +436,55 @@ def main():
     ap.add_argument("--frames", action="store_true",
                     help="also dump per-(cat,vector) uint8 animation frames for "
                          "product D (roughness + K&D) into outputs/web/dyn_frames/")
+    ap.add_argument("--full", action="store_true",
+                    help="ONE march produces BOTH the peak checkpoints AND all four "
+                         "products' animation frames -- the peaks and frames come from the "
+                         "same marches, so this replaces the peaks-then-frames two-run "
+                         "workflow. Frames are clamped to the peaks computed in the same "
+                         "batch (with the dissipative C<=A, D<=B constraint applied), so "
+                         "the animation settles exactly onto the static footprint. Use this "
+                         "for any new design: one notebook, one run.")
     ap.add_argument("--only", default=None,
-                    help="restrict to one category (cat1|cat3|cat5), for prototyping")
+                    help="restrict to one group (cat1|cat3|cat5, or 'all'), for prototyping")
+    ap.add_argument("--constrained", action="store_true",
+                    help="run the lumped constrained n=200 design: reads "
+                         "inputs_constrained.json, writes powell_dyn_constrained*.json "
+                         "and dyn_frames_constrained/ (legacy products left untouched)")
     ap.add_argument("--batches", type=int, default=None,
                     help="stop after N batches per category, for prototyping")
     ap.add_argument("--limit", type=int, default=None,
                     help="cap storms per batch (march cost scales with batch size), "
                          "so the frame output can be validated in minutes")
+    ap.add_argument("--select", default=None,
+                    help="subset of storms to run: 'bulk' (VT>=8 AND CP>=900, the cheap "
+                         "155), 'tail' (the expensive 45), or 'vec:1,2,3' (explicit "
+                         "vectors). Checkpoints accumulate; re-run assemble to merge.")
+    ap.add_argument("--batch-size", type=int, default=BATCH, dest="batch_size",
+                    help=f"storms marched together per batch (default {BATCH}). The march "
+                         "is latency-bound (many tiny sequential steps), so on a big-memory "
+                         "GPU (A100) a much larger batch amortizes the per-step overhead "
+                         "over more storms for near-free throughput. Cost-sorting keeps a "
+                         "batch's timestep homogeneous, so large batches don't over-shrink "
+                         "dt for the mild storms. Try 100-155 on an A100.")
+    ap.add_argument("--assemble-only", action="store_true", dest="assemble_only",
+                    help="skip solving; just merge existing checkpoints into the products")
     args = ap.parse_args()
+    FULL = args.full
     FRAMES_ALL = args.frames_all
     FRAMES_ONLY = args.frames_only or FRAMES_ALL
-    WANT_FRAMES = args.frames or FRAMES_ONLY
+    WANT_FRAMES = args.frames or FRAMES_ONLY or FULL
+    if args.constrained:
+        global CKPT, FRAMES_DIR, PRODUCTS, INPUTS_JSON, MANIFEST_JSON
+        INPUTS_JSON = os.path.join(WEB, "inputs_constrained.json")
+        CKPT = os.path.join(ROOT, "outputs", "dynamic", "precompute_constrained")
+        FRAMES_DIR = os.path.join(WEB, "dyn_frames_constrained")
+        MANIFEST_JSON = os.path.join(WEB, "dyn_frames_constrained.json")
+        PRODUCTS = {k: (fn.replace(".json", "_constrained.json"), note)
+                    for k, (fn, note) in PRODUCTS.items()}
     os.makedirs(CKPT, exist_ok=True)
     device = H.device_select()
     grid = json.load(open(os.path.join(WEB, "grid.json")))
-    inputs = json.load(open(os.path.join(WEB, "inputs.json")))
+    inputs = json.load(open(INPUTS_JSON))
     rough = json.load(open(os.path.join(WEB, "roughness.json")))
     pts = grid["points"]
     ew = torch.tensor([p["ew"] for p in pts], dtype=torch.float32, device=device)
@@ -418,27 +509,65 @@ def main():
             print(f"  {k}: max|d|={float(d.max()):.2f}  mean|d|={float(d.mean()):.3f}", flush=True)
         return
 
+    groups = [k for k, v in inputs.items()
+              if isinstance(v, list) and v and isinstance(v[0], dict)]
+
+    if args.assemble_only:
+        assemble(inputs)
+        return
+
+    # Storm selection (for piecewise runs). The march cost of a storm ~ (long window from
+    # low VT) x (tiny timestep from high intensity), two INDEPENDENT penalties; 155 of the
+    # 200 pay neither. 'bulk' runs those 155; 'tail' the 45 that pay at least one; 'vec:'
+    # names explicit storms so the expensive ones can be studied one at a time.
+    def selected(rec):
+        if not args.select or args.select == "all":
+            return True
+        vt, cp = float(rec["VT"]), float(rec["CP"])
+        if args.select == "bulk":
+            return vt >= 8.0 and cp >= 900.0
+        if args.select == "tail":
+            return not (vt >= 8.0 and cp >= 900.0)
+        if args.select.startswith("vec:"):
+            return int(rec["vector"]) in {int(x) for x in args.select[4:].split(",") if x}
+        raise SystemExit(f"bad --select {args.select!r}")
+
     t0 = time.time()
-    cats = (args.only,) if args.only else ("cat1", "cat3", "cat5")
-    partial = bool(args.only or args.batches)
+    cats = (args.only,) if args.only else tuple(groups)
+    partial = bool(args.only or args.batches or args.select)
     for cat in cats:
-        order = sorted(range(len(inputs[cat])), key=lambda i: -float(inputs[cat][i]["VT"]))
+        # Sort ascending by a march-cost proxy so the CHEAP storms run first (early
+        # progress + a real projection) and the expensive intense/slow ones cluster at the
+        # end. cost ~ sqrt(deficit) / VT: high intensity (small dt) and low VT (long window)
+        # both raise it. Batching by cost also keeps a single expensive storm from dragging
+        # a whole batch of cheap ones into tiny shared timesteps.
+        def cost(i):
+            r = inputs[cat][i]
+            return math.sqrt(max(float(r["FFP"]) - float(r["CP"]), 1e-6)) / float(r["VT"])
+        order = [i for i in sorted(range(len(inputs[cat])), key=cost)
+                 if selected(inputs[cat][i])]
+        print(f"[{cat}] {len(order)} storms selected"
+              f"{' (' + args.select + ')' if args.select else ''}", flush=True)
+        bsz = args.batch_size
         nb = 0
-        for bi in range(0, len(order), BATCH):
+        for bi in range(0, len(order), bsz):
             if args.batches and nb >= args.batches:
                 break
-            idxs = order[bi:bi + BATCH]
+            idxs = order[bi:bi + bsz]
             if args.limit:
                 idxs = idxs[:args.limit]
             recs = [inputs[cat][i] for i in idxs]
-            run_batch(cat, bi // BATCH, recs, idxs, grid, z0_fn, is_land, ew, ns, device)
+            run_batch(cat, bi // bsz, recs, idxs, grid, z0_fn, is_land, ew, ns, device)
             nb += 1
             done = time.time() - t0
             print(f"== elapsed {done/3600:.2f} h ==", flush=True)
     if WANT_FRAMES:
         write_frame_manifest()
-    if partial:
-        print("partial run (--only/--batches): skipping assemble()", flush=True)
+    # assemble() is glob-based and incremental, so it is safe to run after a subset: it
+    # writes valid products with the not-yet-run storms left null. Skip only for --only
+    # (legacy per-category prototyping) and --batches (mid-run prototyping).
+    if args.only or args.batches:
+        print("prototyping run (--only/--batches): skipping assemble()", flush=True)
         return
     assemble(inputs)
 
@@ -464,15 +593,15 @@ def write_frame_manifest():
         "n_vertices": 840, "n_frames": N_FRAMES,
         "t_min": T_MIN, "t_max": T_MAX, "dt": FRAME_DT,
         "layout": "frame-major: frame f occupies bytes [f*840, (f+1)*840)",
-        "file": "dyn_frames/{cat}_v{vector}_{product}.bin",
+        "file": os.path.basename(FRAMES_DIR) + "/{cat}_v{vector}_{product}.bin",
         "counts": {k: len(v) for k, v in sorted(byprod.items())},
         "note": "Frames are clamped to the product's stored peak. Outside the dynamic "
                 "window [t0, t1] they carry the frozen marine translation: before t0 the "
                 "storm is offshore and the field genuinely IS marine; after t1 it is 60+ "
                 "mi past the grid edge, where the marine/decayed distinction is negligible.",
     }
-    json.dump(man, open(os.path.join(WEB, "dyn_frames.json"), "w"))
-    print(f"wrote dyn_frames.json ({man['counts']})", flush=True)
+    json.dump(man, open(MANIFEST_JSON, "w"))
+    print(f"wrote {os.path.basename(MANIFEST_JSON)} ({man['counts']})", flush=True)
 
 
 if __name__ == "__main__":

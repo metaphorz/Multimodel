@@ -31,6 +31,11 @@ torch.set_float32_matmul_precision('high')
 # Utilities & numerics
 # -------------------------
 def device_select():
+    # CUDA first so the solver runs on an A100/GPU cloud box (Colab, vast.ai); then Apple
+    # MPS for local Macs; CPU only as a last resort. Without the CUDA branch a GPU box
+    # would silently fall back to CPU and crawl.
+    if torch.cuda.is_available():
+        return torch.device('cuda')
     if torch.backends.mps.is_available():
         return torch.device('mps')
     return torch.device('cpu')
@@ -277,6 +282,39 @@ def ddr_upwind(F, dr, w):
     Fm = torch.cat([F[..., :1, :], F[..., :-1, :]], dim=-2)
     return torch.where(w > 0, F - Fm, Fp - F) / dr
 
+
+def _minmod(a, b):
+    """Minmod slope limiter: same sign -> the smaller magnitude, opposite sign -> 0.
+
+    Branchless arithmetic form (no nested torch.where): 0.5*(sign(a)+sign(b))*min(|a|,|b|).
+    Same-sign -> +/-1 * smaller magnitude; opposite-sign -> 0. This avoids the nested
+    where(), which stalls the batched 30k-iter spin-up on MPS/Metal (GPU<->CPU sync per
+    step); pure sign/abs/minimum are all GPU-native and keep the march at full speed."""
+    return 0.5 * (torch.sign(a) + torch.sign(b)) * torch.minimum(a.abs(), b.abs())
+
+
+def ddphi_muscl(F, dphi, a):
+    """TVD (MUSCL + minmod) azimuthal derivative dF/dphi, upwind-biased by the advecting
+    azimuthal velocity a (the tangential wind v). Periodic in phi (roll on the last dim).
+
+    This REPLACES the centered ddphi_b in the DYNAMIC advection. Centered differencing is
+    non-monotone: on the constrained design's under-resolved tiny-eye front it produces
+    dispersive grid-scale ringing that the nonlinear advection amplifies to unphysical
+    peaks (product D reached 5018 mph). A minmod-limited MUSCL flux is TVD -- second-order
+    where the field is smooth, reverting to monotone first-order upwind at extrema -- so
+    the sharp eyewall is captured WITHOUT oscillation. The fix is the exact mechanism the
+    PyClaw side test validated (tests/auto/pyclaw_radial_dambreak.py: MC-limited FV holds
+    a sharp radial front where the unlimited/centered scheme rings). The radial advection
+    is already first-order upwind (ddr_upwind), so only the azimuthal term needed this."""
+    Fm = roll(F, 1, -1)                     # F_{i-1}
+    Fp = roll(F, -1, -1)                    # F_{i+1}
+    dm = F - Fm                             # backward difference
+    dp = Fp - F                             # forward difference
+    s = _minmod(dm, dp)                     # limited cell slope sigma_i
+    d_pos = dm + 0.5 * (s - roll(s, 1, -1))     # a >= 0: upwind from the left
+    d_neg = dp - 0.5 * (roll(s, -1, -1) - s)    # a <  0: upwind from the right
+    return torch.where(a >= 0, d_pos, d_neg) / dphi
+
 def physics_terms_dyn(u, v, rr, dphi, dr, f, dpdr, rho, Kh, beta10, h_bl, z0_field=None):
     """Tendencies for the DYNAMIC (long physical-time) integration. Two deliberate
     differences from physics_terms, each required for multi-hour stability
@@ -291,8 +329,12 @@ def physics_terms_dyn(u, v, rr, dphi, dr, f, dpdr, rho, Kh, beta10, h_bl, z0_fie
          stays centered (smooth, periodic).
     z0_field (m): surface under each node; land (z0 > 1e-3 m) -> log-law drag,
     water keeps the wind-speed-dependent Large & Pond marine drag."""
-    ur = ddr_upwind(u, dr, u); uphi = ddphi_b(u, dphi)
-    vr = ddr_upwind(v, dr, u); vphi = ddphi_b(v, dphi)
+    # Radial advection: first-order upwind (inflow-shock capture, already monotone).
+    # Azimuthal advection: MUSCL + minmod (TVD), upwind-biased by the tangential wind v.
+    # This replaces the centered ddphi_b whose dispersive ringing on the under-resolved
+    # tiny-eye front drove the product-D blow-up on the constrained design.
+    ur = ddr_upwind(u, dr, u); uphi = ddphi_muscl(u, dphi, v)
+    vr = ddr_upwind(v, dr, u); vphi = ddphi_muscl(v, dphi, v)
     adv_u = u*ur + (v/rr)*uphi - (v**2)/rr
     adv_v = u*vr + (v/rr)*vphi + (u*v)/rr
     lap_u = laplacian_b(u, rr, dr, dphi)
@@ -372,7 +414,14 @@ def pde_steady_marine(args, device=None):
     # Apply surface roughness effects if provided
     speed_ms = apply_roughness_effects(speed_ms, r, phi_g, args, device, 'pde')
     
-    meta = dict(r=r, phi=phi_g, Rmax=args.rmax_core_km, base_tag="pde_marine", model_label="PDE (marine)")
+    # Earth-relative wind COMPONENTS, kept alongside the speed. Direction is
+    # atan2(Uy, Ux) and it is needed for direction-dependent surface roughness: the
+    # effective z0 at a site depends on the terrain UPWIND of it, so the roughness
+    # follows the wind vector round as the storm passes. u and v come out of the PDE,
+    # so the frictional inflow angle is solved for rather than assumed, and (c_x, c_y)
+    # is the storm translation -- both already in these components.
+    meta = dict(r=r, phi=phi_g, Rmax=args.rmax_core_km, base_tag="pde_marine",
+                model_label="PDE (marine)", Ux=Ux_er, Uy=Uy_er)
     return speed_ms, meta
 
 # -------------------------
@@ -623,8 +672,14 @@ def _dyn_step_batch(S, u, v, dpdr_t, Vg_t, z0, budget_s):
     return u, v, float(dt)
 
 def pde_dynamic_spinup_batch(S, dyn):
-    """Converged spin-up under the forcing at dyn.t0_h; per-storm convergence
-    (every storm's maxU must drift < 0.005 m/s per 1000 iters)."""
+    """Converged spin-up under the forcing at dyn.t0_h; per-storm convergence checked on
+    maxU drift. The MUSCL azimuthal advection (ddphi_muscl) resolves the eyewall instead
+    of smearing it, so a single hot cell wiggles a few hundredths of a m/s indefinitely
+    and the old 0.005 m/s bar (0.01 mph) was never met -> every spin-up ran the full cap.
+    A 0.05 m/s bar (0.1 mph) is still far below the model's own uncertainty and lets a
+    well-behaved storm exit early; the march re-equilibrates within its first hour anyway,
+    and the reported metric is the PEAK over the whole window, so the tiny residual drift
+    is invisible in the result. Checked every 500 iters so the exit is caught sooner."""
     dpdr_t, Vg_t, z0 = _dyn_forcing_batch(S, dyn, dyn.t0_h)
     V10 = S["beta10"] * Vg_t
     u = -V10 * torch.sin(S["theta_in"])
@@ -632,9 +687,9 @@ def pde_dynamic_spinup_batch(S, dyn):
     prev = None
     for n in range(dyn.spinup_iter):
         u, v, _ = _dyn_step_batch(S, u, v, dpdr_t, Vg_t, z0, None)
-        if (n + 1) % 1000 == 0:
+        if (n + 1) % 500 == 0:
             cur = torch.amax(torch.sqrt(u*u + v*v), dim=(-2, -1))    # (B,)
-            if prev is not None and float((cur - prev).abs().max()) < 0.005:
+            if prev is not None and float((cur - prev).abs().max()) < 0.05:
                 break
             prev = cur
     return u, v

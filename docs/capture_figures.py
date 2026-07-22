@@ -66,6 +66,10 @@ FIGURES = [
                                  "animRenderFrame(30);}, 900);"}, None),
     ("analysis_src",     {"model": "powell", "_btn": "btnSRC"}, ".analysis-panel"),
     ("analysis_epr",     {"model": "powell", "_btn": "btnEPR"}, ".analysis-panel"),
+    # Shapley view of the Sensitivity panel (constrained design's primary SA method).
+    ("analysis_shapley", {"model": "powell", "_btn": "btnSRC",
+                         "_js": "[...document.querySelectorAll('.sa-tab')]"
+                                ".find(b=>b.dataset.m==='shapley').click();"}, ".analysis-panel"),
     # Sobol' view of the Sensitivity panel. An emulator is fit for BOTH land configs,
     # so these capture in the viewer's shipped default (roughness + K-D decay on).
     ("analysis_sobol",   {"model": "powell", "category": "5", "_btn": "btnSRC",
@@ -86,10 +90,10 @@ FIGURES = [
                                "profilerState.scale='point';profilerState.view='matrix';"
                                "profilerPickPoint(state.grid.points.findIndex(p=>p.ew===6&&p.ns===33));"},
                         ".analysis-panel"),
-    ("analysis_tlc_cdf",  {"model": "powell", "category": "5", "response": "tlc",
+    ("analysis_tlc_cdf",  {"model": "powell", "response": "tlc",
                           "_btn": "btnCDF"}, ".analysis-panel"),
     ("analysis_compare",  {"model": "powell", "category": "5", "_btn": "btnCompare"}, ".analysis-panel"),
-    ("grid_sensitivity",  {"model": "powell", "category": "1",
+    ("grid_sensitivity",  {"model": "powell",
                           "colorBy": "sensitivity", "display": "points"}, None),
     ("windfield_popup",  {"model": "holland", "category": "5", "_click": [30, 0]}, ".wf-panel"),
     ("points_of_interest", {"model": "powell", "category": "5", "colorBy": "wind",

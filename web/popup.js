@@ -59,7 +59,7 @@ function windfieldBodyHTML(idx) {
     field = { Z: pf, n: state.powellField.n, halfKm: state.powellField.halfKm };
     ts = powellTimeSeries(field, pt, rec, { rough, decay }, idx);
   } else {
-    const B = quantileToB(rec.WSP);
+    const B = recB(rec);
     field = stormRelativeField(model, rec, B, 90, 81);
     const opts = {};
     if (rough && state.roughness) opts.factor = state.roughness.factors[idx];

@@ -70,25 +70,17 @@
     </section>
 
     <section>
-      <h2>Hurricane category</h2>
-      <select id="category">
-        <option value="1">Category 1</option>
-        <option value="3">Category 3</option>
-        <option value="5" selected>Category 5</option>
-      </select>
-    </section>
-
-    <section>
       <h2>Input vector</h2>
-      <input id="vector" type="range" min="1" max="100" value="1" />
-      <span id="vectorLabel">1</span> / 100
-      <p class="hint">The map always shows one storm. Outputs (TLC, wind mean/max)
-        are totals over the land grid points for that vector &mdash; see Status.</p>
+      <input id="vector" type="range" min="1" max="200" value="1" />
+      <span id="vectorLabel">1</span> / 200
+      <p class="hint">The constrained design is a single population of 200 storms spanning
+        the full intensity range (no Cat 1/3/5 split). The map always shows one storm;
+        outputs (TLC, wind mean/max) are totals over the land grid points &mdash; see Status.</p>
       <div id="vecRow" class="vec-row"></div>
     </section>
 
     <section id="bsection">
-      <h2>Shape parameter B (from WSP quantile)</h2>
+      <h2>Shape parameter B (what-if)</h2>
       <label>Distribution
         <select id="bdist">
           <option value="uniform" selected>Uniform</option>
@@ -97,7 +89,9 @@
         </select>
       </label>
       <div id="bparams"></div>
-      <p id="bnote" class="bnote">Reshapes the single-point profiler only — all footprint windfields are precomputed.</p>
+      <p id="bnote" class="bnote">The constrained design supplies Holland&nbsp;B directly per
+        storm (Powell&nbsp;Eq.&nbsp;7). This control only reshapes the single-point profiler's
+        what-if exploration — all footprint windfields are precomputed from the design's B.</p>
     </section>
 
     <section>

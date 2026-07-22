@@ -35,25 +35,33 @@ RESPONSES = ["wind", "windmax", "tlc_uniform", "tlc_census", "tlc_tax"]
 SEED = 0
 # Sobol' Monte-Carlo budget. n=2048 (the original) left the indices drifting by
 # ~0.05 -- as large as the interaction effect itself. Converged to <0.01 here.
-N_SOBOL = 262144
-REPS = 3
-# second-order indices need d + C(d,2) + 2 = 23 evaluations per sample, so they run
-# at a smaller n to keep the build quick; the pairwise signal is ~10x its noise.
-N_SOBOL2 = 131072
-REPS2 = 2
+#
+# S1, ST and S2 are all taken from ONE A/B sample per replicate (see sobol_decompose).
+# They used to come from two separate samplings at different budgets, which meant the
+# S_i subtracted inside S_ij was a DIFFERENT estimate from the S_i reported alongside
+# it: their sampling errors added instead of cancelling, and the decomposition summed
+# to 1.014 +/- 0.005 -- overshooting 1, so the higher-order residual came out
+# negative. One sample makes the decomposition self-consistent by construction.
+# 10 replicates (was 3 and 2) resolve the small pairwise cells, which at 2 replicates
+# were pure noise: CP x Rmax read 0.00017 there against 0.00080 +/- 0.00023 here.
+N_SOBOL = 131072
+REPS = 10
 
 
 # ---- reproduce the viewer's default-config output metric in Python --------
-def load_data():
+def load_data(constrained=False):
+    # The constrained n=200 run keeps its own file set so the legacy 3x100 viewer data
+    # stays intact during the migration; --constrained switches the whole input group.
+    tag = "_constrained" if constrained else ""
     grid = json.loads((WEB / "grid.json").read_text())
-    powell = json.loads((WEB / "powell.json").read_text())
+    powell = json.loads((WEB / f"powell{tag}.json").read_text())
     # Kaplan-DeMaria-decayed Powell footprint, same (100 vectors x 840 vertices) shape.
     # Fitting an emulator on this too is what lets the Sobol' indices follow the decay
     # toggle instead of being pinned to the no-decay configuration.
-    powell_kd = json.loads((WEB / "powell_kd.json").read_text())
+    powell_kd = json.loads((WEB / f"powell{tag}_kd.json").read_text())
     rough = json.loads((WEB / "roughness.json").read_text())
     vuln = json.loads((WEB / "vulnerability.json").read_text())
-    inputs = json.loads((WEB / "inputs.json").read_text())
+    inputs = json.loads((WEB / f"inputs{tag}.json").read_text())
     land = np.array([p["land"] for p in grid["points"]], dtype=bool)
     factors = np.array(rough["factors"], dtype=float)        # marine->land per vertex
     xs = np.array(vuln["xs"], dtype=float)
@@ -166,67 +174,51 @@ def mlp_predict_z(params, Xz):
 # Form S-6 inputs are near-uncorrelated (see input_correlation below) and their
 # marginals are uniform over the sampled range (KS test, see check_uniform), so
 # drawing A/B uniformly on the observed box is the correct reference measure.
-def sobol_indices(predict_fn, lo, hi, n=2048, seed=SEED):
+def sobol_decompose(predict_fn, lo, hi, n=N_SOBOL, seed=SEED):
+    """S1, ST and the pairwise S_ij for ONE A/B sample. d + C(d,2) + 2 = 23 evals.
+
+    Everything comes off the same sample on purpose. S_ij = S^closed_ij - S_i - S_j,
+    and the S_i it subtracts is the very estimate returned in the S1 vector, so the
+    error in S_i cancels out of S_ij instead of being an independent second draw.
+    Indices are NOT clipped to [0,1] here: clipping a replicate biases a near-zero
+    index upward, and the replicate spread is what the standard errors are made of.
+    """
     rng = np.random.default_rng(seed)
     d = len(lo)
     A = lo + (hi - lo) * rng.random((n, d))
     B = lo + (hi - lo) * rng.random((n, d))
     fA, fB = predict_fn(A), predict_fn(B)
     var = np.var(np.concatenate([fA, fB])) or 1e-12
+
     S1, ST = np.zeros(d), np.zeros(d)
     for i in range(d):
         ABi = A.copy(); ABi[:, i] = B[:, i]
         fABi = predict_fn(ABi)
         S1[i] = np.mean(fB * (fABi - fA)) / var                       # Saltelli 2010
         ST[i] = 0.5 * np.mean((fA - fABi) ** 2) / var                 # Jansen 1999
-    return np.clip(S1, 0, 1), np.clip(ST, 0, 1)
+
+    S2 = np.zeros((d, d))
+    for i in range(d):
+        for j in range(i + 1, d):
+            ABij = A.copy(); ABij[:, [i, j]] = B[:, [i, j]]
+            closed = np.mean(fB * (predict_fn(ABij) - fA)) / var
+            S2[i, j] = S2[j, i] = closed - S1[i] - S1[j]
+    return S1, ST, S2
 
 
 def sobol_estimate(predict_fn, lo, hi, n=N_SOBOL, reps=REPS):
-    """Average the indices over independent replicates and report the MC error.
+    """Average the decomposition over independent replicates; report the MC error.
 
     The Saltelli S1 estimator is high-variance here (one input carries ~70% of the
     output variance), and at the original n=2048 its Monte-Carlo noise (~0.05) was
     the SAME size as the ST-S1 interaction signal it was meant to reveal. Replicates
-    give an honest standard error, so an interaction can be called real only when it
-    clears its own error bar. Returns (S1, ST, se_S1, se_ST).
+    give an honest standard error, so an effect can be called real only when it
+    clears its own error bar. Returns (S1, ST, S2, se_S1, se_ST, se_S2).
     """
-    runs = [sobol_indices(predict_fn, lo, hi, n=n, seed=SEED + k) for k in range(reps)]
-    S1 = np.mean([r[0] for r in runs], axis=0)
-    ST = np.mean([r[1] for r in runs], axis=0)
-    se_S1 = np.std([r[0] for r in runs], axis=0, ddof=1) / np.sqrt(reps)
-    se_ST = np.std([r[1] for r in runs], axis=0, ddof=1) / np.sqrt(reps)
-    return S1, ST, se_S1, se_ST
-
-
-def sobol_second_order(predict_fn, lo, hi, n=N_SOBOL2, reps=REPS2):
-    """Pure two-way indices S_ij, as a symmetric matrix (diagonal zero).
-
-    S_ij = S^closed_ij - S_i - S_j: the share of output variance carried by the
-    i-j pair *jointly*, over and above their two main effects. This is the exact
-    quantity the interaction matrix asks for by eye -- a cell whose red/max and
-    blue/min curves diverge is a cell with large S_ij.
-    """
-    d = len(lo)
-    mats = []
-    for rep in range(reps):
-        rng = np.random.default_rng(SEED + 100 + rep)
-        A = lo + (hi - lo) * rng.random((n, d))
-        B = lo + (hi - lo) * rng.random((n, d))
-        fA, fB = predict_fn(A), predict_fn(B)
-        var = np.var(np.concatenate([fA, fB])) or 1e-12
-        Sc = np.zeros(d)                                  # closed first-order
-        for i in range(d):
-            ABi = A.copy(); ABi[:, i] = B[:, i]
-            Sc[i] = np.mean(fB * (predict_fn(ABi) - fA)) / var
-        M = np.zeros((d, d))
-        for i in range(d):
-            for j in range(i + 1, d):
-                ABij = A.copy(); ABij[:, [i, j]] = B[:, [i, j]]
-                closed = np.mean(fB * (predict_fn(ABij) - fA)) / var
-                M[i, j] = M[j, i] = closed - Sc[i] - Sc[j]
-        mats.append(M)
-    return np.mean(mats, axis=0)
+    runs = [sobol_decompose(predict_fn, lo, hi, n=n, seed=SEED + k) for k in range(reps)]
+    mean = [np.mean([r[k] for r in runs], axis=0) for k in range(3)]
+    se = [np.std([r[k] for r in runs], axis=0, ddof=1) / np.sqrt(reps) for k in range(3)]
+    return (*mean, *se)
 
 
 def input_correlation(X):
@@ -250,12 +242,15 @@ def r2(y, yhat):
     return float(1 - ss_res / ss_tot)
 
 
-def sobol_block(field, factors, land, xs, mdr, inputs, cat, response, exposure=None):
+def sobol_block(field, factors, land, xs, mdr, inputs, cat, response, exposure=None,
+                n=N_SOBOL, reps=REPS):
     """Fit a GPR to one land configuration and return its Sobol' block.
 
     Called once per land configuration so the indices track the viewer's Kaplan-
     DeMaria toggle. The GPR here is a throwaway emulator used only for the variance
     decomposition -- the exported predictor is still the roughness-only one.
+    (n, reps) default to the full budget; the constrained run passes a smaller budget
+    because there Sobol' is only an independent-uniform REFERENCE -- Shapley is primary.
     """
     X = np.array([[r[v] for v in VARS] for r in inputs[cat]], dtype=float)
     y = metric_columns(field, factors, land, xs, mdr, cat, response, exposure)
@@ -264,31 +259,138 @@ def sobol_block(field, factors, land, xs, mdr, inputs, cat, response, exposure=N
     _, gp = fit_gpr((X - m) / s, y)
     emu = lambda Q: gpr_predict(gp, (Q - m) / s)                      # noqa: E731
     lo, hi = X.min(0), X.max(0)
-    S1, ST, se_S1, se_ST = sobol_estimate(emu, lo, hi)
-    S2 = sobol_second_order(emu, lo, hi)
+    S1, ST, S2, se_S1, se_ST, se_S2 = sobol_estimate(emu, lo, hi, n=n, reps=reps)
     inter = ST - S1
     se_int = np.sqrt(se_S1 ** 2 + se_ST ** 2)
     max_r, max_r_pair = input_correlation(X)
+    iu = np.triu_indices(len(VARS), 1)
     return {
         "S1": S1.tolist(), "ST": ST.tolist(),
         "se_S1": se_S1.tolist(), "se_ST": se_ST.tolist(),
         "interaction": inter.tolist(),
         "resolved": (inter > 2 * se_int).tolist(),
         "sum_S1": float(np.sum(S1)),
-        "S2": S2.tolist(),
+        "S2": S2.tolist(), "se_S2": se_S2.tolist(),
+        # a pair is real only if it clears twice its own MC error; without this the
+        # near-zero cells read as spurious 1e-4 "interactions" that are pure noise
+        "resolved_S2": (np.abs(S2) > 2 * se_S2).tolist(),
+        "sum_S2": float(np.sum(S2[iu])),
         "n": N_SOBOL, "reps": REPS,
         "max_input_corr": max_r, "max_input_corr_pair": max_r_pair,
     }
 
 
-def main():
-    grid, powell, powell_kd, factors, land, xs, mdr, inputs, exposures = load_data()
-    out = {"config": {"model": "powell", "land": "roughness"},
-           "vars": VARS, "note": "GPR/NN predictors are fit for the default config "
-           "(Powell + roughness); Linear/RSM stays live in the browser. Sobol' indices "
-           "are fit for BOTH land configs (sobol = roughness, sobol_kd = roughness + "
-           "Kaplan-DeMaria decay) so they follow the viewer's decay toggle.",
-           "responses": {}}
+# ---- Shapley effects (given-data kNN) for the CORRELATED constrained design ----
+# Sobol' above assumes independent inputs; the constrained n=200 design deliberately
+# couples CP-RMW (r~+0.43) and B-RMW (r~-0.31), so Saltelli's A/B mixing samples storms
+# that violate the envelope and misattributes the shared CP/RMW variance. Shapley effects
+# (Owen 2014; Song, Nelson & Staum 2016) split the variance so the shares sum to EXACTLY 1
+# even under dependence. The estimator is the given-data nearest-neighbour form (Broto,
+# Bachoc & Depecker 2020) -- validated in tests/auto/check_shapley.py -- run on a large
+# IID sample from the constrained joint (make_constrained_design.sample_joint) scored by
+# the same GPR emulator, i.e. the emulator-based SA with the correct reference measure.
+from itertools import combinations                                     # noqa: E402
+from math import comb                                                  # noqa: E402
+from scipy.spatial import cKDTree                                      # noqa: E402
+
+SHAPLEY_N = 20000       # IID joint draws per replicate
+SHAPLEY_K = 40          # kNN neighbours; smoothing bias ~ 1/k, k=40 -> ~0.01 floor
+SHAPLEY_REPS = 5        # replicates (fresh joint samples) for an honest standard error
+
+
+def shapley_knn(X, Y, k=SHAPLEY_K):
+    """Given-data Shapley effects from a joint sample (X, Y). Returns (raw, normalized);
+    raw sum to Var(Y), normalized sum to 1. See tests/auto/check_shapley.py for the
+    known-answer validation (matches Sobol' S1 when inputs are independent)."""
+    X = np.asarray(X, float); Y = np.asarray(Y, float)
+    N, d = X.shape
+    Xz = (X - X.mean(0)) / (X.std(0) + 1e-12)
+    varY = Y.var()
+    cache = {}
+
+    def V(cols):
+        cols = tuple(sorted(cols))
+        if cols in cache:
+            return cache[cols]
+        if len(cols) == 0:
+            v = 0.0
+        elif len(cols) == d:
+            v = varY                       # deterministic emulator: E[Y|X]=Y -> Var(Y)
+        else:
+            _, idx = cKDTree(Xz[:, cols]).query(Xz[:, cols], k=k)
+            v = Y[idx].mean(1).var()
+        cache[cols] = v
+        return v
+
+    Sh = np.zeros(d)
+    for i in range(d):
+        rest = [c for c in range(d) if c != i]
+        for m in range(d):
+            w = 1.0 / (d * comb(d - 1, m))
+            for u in combinations(rest, m):
+                Sh[i] += w * (V(u + (i,)) - V(u))
+    return Sh, Sh / Sh.sum()
+
+
+def shapley_block(field, factors, land, xs, mdr, inputs, cat, response, exposure,
+                  joint_sampler):
+    """Shapley-effect block for one land configuration, mirroring sobol_block's role.
+
+    Fits the throwaway GPR emulator on the training runs, then estimates Shapley effects
+    on SHAPLEY_REPS fresh IID draws from the constrained joint. Reports the mean share
+    per input and its across-replicate standard error.
+    """
+    X = np.array([[r[v] for v in VARS] for r in inputs[cat]], dtype=float)
+    y = metric_columns(field, factors, land, xs, mdr, cat, response, exposure)
+    m, s = X.mean(0), X.std(0)
+    s[s == 0] = 1.0
+    _, gp = fit_gpr((X - m) / s, y)
+    emu = lambda Q: gpr_predict(gp, (Q - m) / s)                      # noqa: E731
+
+    shares = []
+    for rep in range(SHAPLEY_REPS):
+        Xj = joint_sampler(SHAPLEY_N, SEED + rep)
+        _, sh = shapley_knn(Xj, emu(Xj))
+        shares.append(sh)
+    shares = np.array(shares)
+    sh_mean = shares.mean(0)
+    sh_se = shares.std(0, ddof=1) / np.sqrt(SHAPLEY_REPS)
+    max_r, max_r_pair = input_correlation(X)
+    return {
+        "shapley": sh_mean.tolist(),
+        "se": sh_se.tolist(),
+        "sum": float(sh_mean.sum()),          # 1 by construction (partition of variance)
+        "n_joint": SHAPLEY_N, "k": SHAPLEY_K, "reps": SHAPLEY_REPS,
+        "max_input_corr": max_r, "max_input_corr_pair": max_r_pair,
+    }
+
+
+def main(constrained=False):
+    global VARS, CATS
+    joint_sampler = None
+    if constrained:
+        # Lumped C1-C5 design: one group ("all"), physical inputs incl. Holland B direct,
+        # and the CORRELATED joint means Shapley effects are the primary SA (Saltelli
+        # stays as an independent-uniform reference). See the header note below.
+        VARS = ["CP", "Rmax", "VT", "B", "CF", "FFP"]
+        CATS = ["all"]
+        import make_constrained_design as mcd
+        joint_sampler = mcd.sample_joint
+
+    grid, powell, powell_kd, factors, land, xs, mdr, inputs, exposures = load_data(constrained)
+    note = ("GPR/NN predictors are fit for the default config (Powell + roughness); "
+            "Linear/RSM stays live in the browser. ")
+    note += ("Constrained lumped C1-C5 design (n=200). Inputs are CORRELATED (CP-RMW, "
+             "B-RMW), so the PRIMARY sensitivity is Shapley effects (shapley/shapley_kd, "
+             "given-data kNN on the constrained joint, sum to 1 by construction); the "
+             "Saltelli Sobol' block (sobol/sobol_kd) is kept as an independent-uniform "
+             "REFERENCE only and does not respect the couplings."
+             if constrained else
+             "Sobol' indices are fit for BOTH land configs (sobol = roughness, sobol_kd = "
+             "roughness + Kaplan-DeMaria decay) so they follow the viewer's decay toggle.")
+    out = {"config": {"model": "powell", "land": "roughness",
+                      "design": "constrained_n200_lumped" if constrained else "legacy_3x100"},
+           "vars": VARS, "note": note, "responses": {}}
     max_gpr_err = max_mlp_err = 0.0
 
     for response in RESPONSES:
@@ -319,8 +421,12 @@ def main():
 
             # Sobol' for BOTH land configurations, so the viewer's Kaplan-DeMaria
             # toggle selects the matching set instead of hiding the indices entirely.
-            sob = sobol_block(powell, factors, land, xs, mdr, inputs, cat, response, expo)
-            sob_kd = sobol_block(powell_kd, factors, land, xs, mdr, inputs, cat, response, expo)
+            # In constrained mode Sobol' is a reference only -> lighter budget.
+            sob_n, sob_reps = (16384, 4) if constrained else (N_SOBOL, REPS)
+            sob = sobol_block(powell, factors, land, xs, mdr, inputs, cat, response, expo,
+                              n=sob_n, reps=sob_reps)
+            sob_kd = sobol_block(powell_kd, factors, land, xs, mdr, inputs, cat, response, expo,
+                                 n=sob_n, reps=sob_reps)
             S1 = np.array(sob["S1"]); ST = np.array(sob["ST"])
             interaction = np.array(sob["interaction"])
             resolved = np.array(sob["resolved"])
@@ -328,6 +434,16 @@ def main():
             se_int = np.sqrt(np.array(sob["se_S1"]) ** 2 + np.array(sob["se_ST"]) ** 2)
             S2 = np.array(sob["S2"])
             max_r, max_r_pair = sob["max_input_corr"], sob["max_input_corr_pair"]
+
+            # Shapley effects (constrained/correlated design only): the PRIMARY SA, on
+            # the constrained joint, for both land configs. Saltelli above is kept as an
+            # independent-uniform reference.
+            shap = shap_kd = None
+            if constrained:
+                shap = shapley_block(powell, factors, land, xs, mdr, inputs, cat,
+                                     response, expo, joint_sampler)
+                shap_kd = shapley_block(powell_kd, factors, land, xs, mdr, inputs, cat,
+                                        response, expo, joint_sampler)
 
             # MLP
             mlp, mp = fit_mlp(Xz, yz)
@@ -351,6 +467,9 @@ def main():
                 "sobol": sob,          # Powell + surface roughness
                 "sobol_kd": sob_kd,    # Powell + surface roughness + K-D decay
             }
+            if constrained:
+                out["responses"][response][cat]["shapley"] = shap
+                out["responses"][response][cat]["shapley_kd"] = shap_kd
             hits = [VARS[i] for i in range(len(VARS)) if resolved[i]]
             print(f"  {response:4s} {cat}: GPR R²={r2(y, gpr_yhat):.3f} cv={gp_cv:.3f} | "
                   f"MLP R²={r2(y, mlp_yhat):.3f} cv={mp_cv:.3f} | "
@@ -366,15 +485,31 @@ def main():
                 M = np.array(b["S2"])
                 k = int(np.argmax(np.abs(M[iu])))
                 bi, bj = iu[0][k], iu[1][k]
+                resid = 1.0 - b["sum_S1"] - b["sum_S2"]
                 print(f"        Sobol[{tag}]: sum(S1)={b['sum_S1']:.3f} "
+                      f"sum(S2)={b['sum_S2']:+.4f} higher-order={resid:+.4f} | "
                       f"top pair {VARS[bi]}x{VARS[bj]} S_ij={M[bi, bj]:+.4f}")
+            if constrained:
+                for tag, b in (("roughness", shap), ("rough+K-D ", shap_kd)):
+                    sh = np.array(b["shapley"]); se = np.array(b["se"])
+                    order = np.argsort(sh)[::-1]
+                    top = " ".join(f"{VARS[i]}={sh[i]:.2f}±{se[i]:.2f}" for i in order[:3])
+                    print(f"        Shapley[{tag}]: sum={b['sum']:.3f} | {top} | "
+                          f"max|r|={b['max_input_corr']:.2f} ({b['max_input_corr_pair']})")
 
-    (WEB / "metamodels.json").write_text(json.dumps(out))
-    size = (WEB / "metamodels.json").stat().st_size / 1024
+    fname = "metamodels_constrained.json" if constrained else "metamodels.json"
+    (WEB / fname).write_text(json.dumps(out))
+    size = (WEB / fname).stat().st_size / 1024
     print(f"\nParity vs sklearn.predict  GPR max|Δ|={max_gpr_err:.2e}  "
           f"MLP max|Δ|={max_mlp_err:.2e}")
-    print(f"Wrote {WEB/'metamodels.json'} ({size:.0f} KB)")
+    print(f"Wrote {WEB/fname} ({size:.0f} KB)")
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--constrained", action="store_true",
+                    help="fit the lumped constrained n=200 design with Shapley SA "
+                         "-> metamodels_constrained.json")
+    a = ap.parse_args()
+    main(constrained=a.constrained)

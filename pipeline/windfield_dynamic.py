@@ -43,7 +43,10 @@ OUTDIR = os.path.join(ROOT, "outputs", "dynamic")
 DYN_RMIN_KM, DYN_NPHI = 4.0, 180
 DT_FORCING_S = 60.0          # forcing update + sampling interval (Delta T = 1 min)
 T0_H = -2.0                  # marine steady before this; coast interaction after
-SPINUP_ITER = 30000          # cap; spin-up exits early on convergence (~20k iters)
+SPINUP_ITER = 10000          # safety cap; spin-up exits early on convergence (0.05 m/s
+                             # drift). Lowered from 30000: with the MUSCL azimuthal
+                             # scheme a well-behaved storm settles in a few thousand
+                             # iters, and the march re-equilibrates from any residual.
 Z0_MARINE = 2e-4
 
 

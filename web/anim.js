@@ -133,7 +133,9 @@ function dynFramesGet(cat, vector) {
   if (DYN.cache.has(key)) return DYN.cache.get(key);
   if (DYN.inflight.has(key)) return null;
   DYN.inflight.add(key);
-  fetch(`../outputs/web/dyn_frames/${key}.bin`)
+  // frame dir carries the active design's suffix (dyn_frames vs dyn_frames_constrained),
+  // matching the manifest (dyn_frames*.json) the viewer loaded via DF().
+  fetch(`../outputs/web/dyn_frames${DESIGN_SUFFIX}/${key}.bin`)
     .then(r => r.ok ? r.arrayBuffer() : Promise.reject(r.status))
     .then(buf => {
       DYN.cache.set(key, new Uint8Array(buf));
@@ -216,7 +218,7 @@ function animPrecompute() {
     if (!Z) return false;
     pn = state.powellField.n; phalf = state.powellField.halfKm;
   } else {
-    fn = fieldFnFor(model, rec, quantileToB(rec.WSP));
+    fn = fieldFnFor(model, rec, recB(rec));
   }
 
   const fields = [];

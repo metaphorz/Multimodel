@@ -61,7 +61,10 @@ Activities (ROA)~\cite{fchlpm}, which supports \emph{Standard S-3 (Uncertainty A
 Hurricane Model Output)}. The deliverable is an interactive browser application
 (HTML/CSS/JavaScript + Leaflet) that draws the official $21\times40$ grid over
 southern Florida, runs selectable hurricane wind-field models over it, and
-performs the sensitivity (SRC) and uncertainty (EPR) analyses the ROA prescribes.
+performs the sensitivity and uncertainty analyses the ROA prescribes---standardized
+regression (SRC) and, because the storm population is sampled with realistic input
+dependence, dependence-aware \emph{Shapley-effect} sensitivity alongside a
+variance-based (Sobol') cross-check.
 The application is named the \textbf{Pro Team Multimodel} after the five expert
 disciplines a hurricane-model review draws on---\emph{meteorology} (wind fields),
 \emph{vulnerability} (damage curves), \emph{statistics} (sensitivity and
@@ -181,7 +184,7 @@ stepping. The 1-minute step used by the model is fully converged.}
 \label{fig:dtconv}
 \end{figure}
 
-\section{Meteorology: Wind-field models}
+\section{Meteorology: Wind-field models}\label{sec:models}
 Three wind-field models are provided, each evaluated at all 840 vertices.
 \textbf{Powell} is an iterative boundary-layer PDE (slab) solver;
 \textbf{Holland} is the closed-form gradient-wind profile; \textbf{Willoughby}
@@ -195,13 +198,22 @@ precomputed values identical to the live physics. The closed-form Holland and
 Willoughby code is retained for the single-point profiler and the pop-up isotach,
 which evaluate one vertex at a time.
 
-Per-vector inputs come from the \texttt{SA all Variables} worksheet: central
-pressure CP, radius of maximum wind Rmax, translation speed VT, wind-field shape
-parameter WSP, conversion factor CF, and far-field pressure FFP, for 100 vectors
-in each of categories 1, 3, and 5. The pressure deficit is $\Delta p=\text{FFP}-\text{CP}$.
-WSP is supplied as a quantile $p\in[0,1]$ and mapped to the Holland shape
-parameter $B$ through a user-selectable distribution (default Uniform$[1.0,2.5]$,
-$B=B_{\min}+p\,(B_{\max}-B_{\min})$).
+The six per-storm inputs are central pressure CP, radius of maximum wind $R_{\max}$,
+translation speed VT, the Holland wind-field shape parameter $B$, conversion factor
+CF, and far-field pressure FFP; the pressure deficit is $\Delta p=\text{FFP}-\text{CP}$.
+The application now runs a single \textbf{constrained lumped design} of
+$n=200$ storms in which these inputs are sampled as one population that honours the
+dependence structure of the HURDAT2 best-track archive---most importantly the
+central-pressure/radius coupling (CP\,$\sim R_{\max}$, $r\approx0.43$) and a
+radius-dependent shape parameter (the $B$--$R_{\max}$ relation of Powell
+Eq.~7)---rather than as independent uniform draws. Here $B$ is therefore a
+\emph{direct} design input consumed by all three models, not, as in the legacy
+design, a quantile $\text{WSP}\in[0,1]$ mapped to $B$ through a user-chosen
+distribution. Sampling storms this way changes which inputs matter and requires a
+dependence-aware sensitivity method; both are taken up in Section~\ref{sec:sa}.
+The legacy design---100 vectors in each of ROA categories 1, 3, and 5, with WSP as a
+quantile---is retained as an independent-inputs baseline and cross-check
+(Sections~\ref{sec:sobol},~\ref{sec:jmpcheck}).
 
 \paragraph{Conversion factor (CF).}
 The ROA CF variable converts modelled gradient winds to surface winds using a
@@ -218,7 +230,10 @@ $-12$\,h\,$\to\,+24$\,h passage. The storm position is sampled at a 1-minute ste
 ($\Delta t=\tfrac{1}{60}$\,h); coarser sampling aliases the fast westward motion
 and under-resolves the peak (quantified in Figure~\ref{fig:dtconv}).
 Figures~\ref{fig:powellpts} and \ref{fig:contours} show the peak field as coloured
-points and as filled contours.
+points and as filled contours. (Throughout, figures labelled by a Saffir--Simpson
+category---``Category~5,'' etc.---show an \emph{illustrative} storm at that intensity;
+the constrained population itself is unstratified, so the label denotes an example
+strength, not a design bin.)
 
 \begin{figure}[H]
 \centering
@@ -293,7 +308,7 @@ gradient balance. The converged field is the \emph{equilibrium} (mature-storm)
 structure---a single steady field, not a time snapshot---to which the translation
 vector is added for the earth-relative wind. At $\sim$2.3\,s per solve (PyTorch/MPS,
 \texttt{hurricane\_pde\_marine.py}) this is far too costly for the browser, so the
-$100$ vectors $\times$ $3$ categories are solved \emph{offline}
+$200$ storms of the constrained population are solved \emph{offline}
 (\texttt{pipeline/windfield\_grid.py}) and only \emph{sampled} at run time---which is
 why Powell single-point sensitivity uses a per-vertex metamodel
 (Section~\ref{sec:metamodel}) rather than a live re-solve.
@@ -426,7 +441,9 @@ independently wrong. Fixing the statistics dissolved the interface constraint.
 \subsection{Is the dynamic model worth its cost?}\label{sec:steadyvsdyn}
 The dynamic model is roughly two orders of magnitude more expensive than the steady
 one. It is therefore fair to ask what it buys, and the honest answer requires first
-disposing of a confound.
+disposing of a confound. (This model-versus-model study was run on the legacy
+3-category design and is reported in those terms; it compares two \emph{solvers} of
+the same equations, so the sampling design is immaterial to its conclusions.)
 
 \paragraph{Time integration does nothing under constant forcing.} This is not an
 assumption but a measured identity: under constant marine forcing the dynamic march
@@ -470,9 +487,10 @@ cosmetic, and they are concentrated exactly where the physics above predicts---i
 \begin{itemize}
 \item \textbf{The worst-hit vertex moves.} The location of the maximum land wind changes
 in $21$--$38\%$ of storms, by as much as $41.7$\,mi---some fourteen grid cells.
-\item \textbf{The dominant input flips.} For Category~3 \emph{max} wind, the first-order
-Sobol' index of $R_{\max}$ rises from $0.028$ (steady) to $0.597$ (dynamic) while WSP
-falls from $0.761$ to $0.261$. In the steady model the worst-hit point is set by how
+\item \textbf{The dominant input flips.} For Category~3 \emph{max} wind (legacy
+baseline, shape input WSP), the first-order Sobol' index of $R_{\max}$ rises from
+$0.028$ (steady) to $0.597$ (dynamic) while WSP falls from $0.761$ to $0.261$. In the
+steady model the worst-hit point is set by how
 \emph{peaked} the eyewall is; once the field may evolve across land it is set by how
 \emph{big} the storm is. A sensitivity ranking handed to a regulator would name a
 different parameter.
@@ -536,6 +554,54 @@ limestone quarry lakes), so they carry exposure/loss on what is physically water
 Adjacent-vertex roughness differences---which can drive the large point-to-point
 loss spread seen in the Cat~1/Cat~3 groups---are likewise directly inspectable.
 
+\paragraph{Direction-dependent roughness (prototype; not the basis of the reported
+indices).} The roughness above is \emph{isotropic}: one $z_0$ per vertex, blended over a
+circular window, applied as a time-independent multiplier. Physically, roughness is a
+property of the terrain \emph{upwind} of a site along the direction the wind is currently
+coming from---so as a storm passes and the wind veers, a coastal vertex sees a smooth sea
+fetch at one hour and a rough urban fetch at another. This is what the Florida
+\emph{public} model does (Powell et al.\ 2005~\cite{powell2005}, §8), using a
+fetch-dependent effective roughness per wind direction. We have prototyped it: effective
+$z_0$ computed for $12$ upwind sectors per vertex by a source-area (footprint) weighting
+(van Ulden 1978; Horst \& Weil 1992/94, the analytical core of the Schmid--Oke model),
+drag-averaged over a $10$\,km fetch and evaluated at the $\sim\!60$\,m blending height,
+then applied \emph{inside} the time loop---$\max_t[V(t)\,f(\theta(t))]$ rather than
+$[\max_t V(t)]\,f$, since a time-varying factor does not commute with the peak. The
+spatial effect is real and large: on an onshore wind a barrier-island vertex reaches
+open-water exposure (Dania Beach $+40$\,mph over the isotropic value), while a fully
+inland vertex, whose $20$\,km fetch is unbroken city rather than the local parks the
+circular window catches, \emph{loses} $\sim\!9$\,mph.
+
+Crucially, however, this leaves the \emph{sensitivity} analysis unchanged. Recomputing
+the Sobol' indices of Section~\ref{sec:sobol} on the directional field moves every
+main-effect and total index by $\le 0.002$---below the Monte-Carlo error---for all three
+categories. In particular VT does not gain influence (one might expect it to, since it
+sets how fast the wind veers; but every storm here tracks due west through the same
+sector sequence, so VT shifts the \emph{timing} of the peak without shifting which inputs
+govern its \emph{magnitude}). The reported indices and the hold-out test
+(Section~\ref{sec:holdout}) are therefore computed for the isotropic roughness of the
+shipped default, and are robust to this choice: the spatial redistribution of wind does
+not alter which parameters the loss is sensitive to.
+
+The \emph{magnitude} of the loss, however, is \emph{not} robust to it---and this is the
+reason the directional treatment is worth pursuing despite the invariant indices. The
+spatial redistribution barely moves the domain-mean wind ($-1$\,mph), because the coastal
+gain and the inland loss nearly cancel; but they do not cancel in the loss, which is both
+nonlinear in wind and value-weighted. Under \textbf{uniform} exposure, where inland
+vertices outnumber coastal ones, directional roughness \emph{lowers} \%TLC by $1.4$--$7$\%
+(largest at Cat~1). Under \textbf{Census} exposure---the realistic case, in which value is
+concentrated on the coast (Gini~$0.84$)---it \emph{raises} \%TLC by $3$--$11$\%, because
+the wind rises exactly where the value is. The same wind-field change thus moves the loss
+in \emph{opposite} directions depending on the exposure book, and the isotropic model
+systematically under-predicts coastal loss under realistic exposure. This is a
+loss-\emph{accuracy} question, distinct from the sensitivity question above, and is left
+as future work---and it couples naturally to the gust factor. The mean-to-gust conversion
+of Section~\ref{sec:orderops} currently uses constant land values, but a rougher fetch
+\emph{lowers} the mean wind while \emph{raising} the gust factor, so the same directional
+effective $z_0$ computed here should feed \emph{both} the roughness and the gust factor,
+the two effects partly offsetting. Adopting directional roughness and a $z_0$-dependent
+gust factor is therefore one combined refinement.
+
 \paragraph{Kaplan--DeMaria decay.}
 Roughness alone cannot reproduce a storm weakening as it moves inland, which is
 a \emph{temporal} filling process. The Kaplan--DeMaria (1995) model is offered as
@@ -545,12 +611,58 @@ background $V_b=30.7$\,mph over land, with a gentle recovery
 ($\alpha_{\text{rec}}=0.05\,\text{h}^{-1}$) once the centre re-emerges over the
 Gulf. Landfall ($\approx$E-W~9) and Gulf exit ($\approx$E-W~99) are read from the
 $N$-$S=0$ track land mask. Figure~\ref{fig:kdloss}~(left) shows the resulting
-inland decay for a Category~5 storm. Roughness and decay compose multiplicatively
-and are on by default: because the roughness factor is time-independent, the
-combined peak equals (decayed peak)\,$\times$\,(roughness factor). With both
-active the peak wind/loss returns to the coast---e.g.\ at a point $60$\,mi inland
-over the Everglades the Cat~5 mean peak falls from $\approx\!158$\,mph (marine) to
-$\approx\!78$\,mph---rather than persisting at full marine strength far inland.
+inland decay for a Category~5 storm. Roughness and decay are on by default. Surface
+roughness and the gust factors of Section~\ref{sec:orderops} are scalar multipliers, so
+they factor cleanly out of the peak-over-passage; the decay itself, however, is applied
+to the max \emph{$1$-minute sustained} wind---keyed to the intensity
+$V_0=1.1\times$(marine peak)---rather than the $10$-minute mean, following the order of
+operations of Section~\ref{sec:orderops}. With both effects active the peak wind returns
+toward coastal values inland---e.g.\ at a point $60$\,mi inland over the Everglades the
+Cat~5 mean surface wind falls from $\approx\!158$\,mph (marine) to $\approx\!78$\,mph,
+before the gust conversion to the $3$-second basis---rather than persisting at full
+marine strength far inland.
+
+\subsection{Order of operations: from wind to loss}\label{sec:orderops}
+The meteorological transforms of the last three sections compose in a definite
+\emph{order}, and the order matters. Figure~\ref{fig:orderops} sets the sequence out.
+The wind-field solve returns the \textbf{total} earth-relative wind---the storm's
+circulation \emph{plus} its translation vector, i.e.\ what a $10$\,m anemometer would
+record---so the field is asymmetric (stronger on the right of the track, the north side
+for a westward storm) and every downstream transform acts on that total wind. The
+conversion factor then brings the gradient wind to a $10$-minute-mean marine surface
+wind; surface roughness converts marine to land; a \textbf{gust factor} lifts the mean
+to a peak gust; and Kaplan--DeMaria decay weakens the storm inland.
+
+Two of these steps carry a subtlety that the right-hand column of
+Figure~\ref{fig:orderops} corrects. First, the damage curve of
+Section~\ref{sec:vuln} is defined on the ASCE~7 \emph{3-second gust}, so the mean
+surface wind must be lifted to a gust before it enters the curve---a
+$10\text{-min}\rightarrow1\text{-min}$ factor ($\approx1.1$) and a
+$1\text{-min}\rightarrow3\text{-s}$ factor ($\approx1.3$). Second, Kaplan--DeMaria was
+calibrated on the \emph{max $1$-minute sustained} wind, so the decay must act on the
+$1$-minute wind---\emph{after} the first gust factor---not on the $10$-minute mean.
+That ordering cannot be recovered by a trailing multiplier, because the decay is
+\emph{affine} (it settles toward a fixed background $V_b=30.7$\,mph) and so does not
+commute with a gust factor. The grey chip on each box tracks the averaging period; the
+corrected sequence climbs $10$-min\,$\rightarrow$\,$1$-min\,$\rightarrow$\,$3$-s so that
+the wind reaches the damage curve on the basis the curve expects. The gust factors shown
+are constant land values; because they and the surface roughness are scalars, they
+commute with the peak-over-passage, so the whole correction reduces in code to feeding
+the decay the $1$-minute intensity and applying the combined $1.1\times1.3\approx1.43$
+gust at the curve. (Direction- and speed-dependent gust factors---smaller over water
+than over land---are a planned refinement.)
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{order_of_operations.png}
+\caption{The wind-to-loss order of operations. Every step after the wind solve acts on
+the \emph{total} earth-relative wind (translation included). \emph{Left:} the sequence
+as first implemented. \emph{Right:} the corrected sequence---Kaplan--DeMaria decay moved
+onto the $1$-minute sustained wind, and the two gust factors added---so the wind meets
+the $3$-second-gust damage curve on a matching basis. Grey chips track the averaging
+period.}
+\label{fig:orderops}
+\end{figure}
 
 \section{Vulnerability: Damage curves}\label{sec:vuln}
 The ROA (p.~186) fixes a single insured structure at \emph{every} one of the 682
@@ -719,46 +831,132 @@ loss field as Mean Damage Ratio (right), both as filled contours.}
 \end{figure}
 
 \section{Statistics: Sensitivity and uncertainty analysis}\label{sec:sa}
-Following Iman, Johnson, and Schroeder (2001)~\cite{iman}, as the ROA cites:
+Following Iman, Johnson, and Schroeder (2001)~\cite{iman}, as the ROA cites, the
+app reports three complementary sensitivity measures, computed over the single
+constrained population of $n=200$ storms (introduced with the model inputs in
+Section~\ref{sec:models}; its statistical consequences are the subject of this section):
 \begin{itemize}
 \item \textbf{Sensitivity (SRC).} Standardized regression coefficients from
-regressing the standardized output on the six standardized inputs over the 100
-SA vectors, per category. Sign gives direction, magnitude gives influence
-(ROA Fig.~9).
-\item \textbf{Uncertainty (EPR).} Expected percentage reduction in output
-variance per input (ROA Fig.~10). For \emph{Powell} the EPR is the variance share
-\[
-\text{EPR}_i=\frac{\mathrm{Var}\!\left(Y\,\middle|\,\text{only }X_i\text{ varies}\right)}
-{\mathrm{Var}(Y_{\text{SA}})}\times100\%,
-\]
-computed faithfully from the six one-variable ROA ``UA for $X$'' worksheets
-(1{,}800 PDE solves); the analytic models use the
-$\text{EPR}_i=\text{SRC}_i^2$ approximation.
+regressing the standardized output on the six standardized inputs over the 200
+storms. Sign gives direction, magnitude gives influence (ROA Fig.~9).
+\item \textbf{Uncertainty (EPR).} Expected percentage reduction in output variance
+per input (ROA Fig.~10), reported as the variance share $\text{EPR}_i=\text{SRC}_i^2$.
+The ROA's \emph{faithful} EPR---$\mathrm{Var}(Y\mid\text{only }X_i\text{ varies})/\mathrm{Var}(Y_{\text{SA}})$
+from the six one-variable ``UA for $X$'' worksheets---requires a one-at-a-time
+perturbation design, which the constrained population, sampled jointly with input
+dependence, does not provide; the dependence-aware apportionment is instead carried
+by the Shapley effects below. (The legacy 3-category design retains the faithful
+1{,}800-solve EPR as a baseline.)
+\item \textbf{Shapley effects.} A game-theoretic apportionment of output variance
+that remains valid when the inputs are \emph{dependent}---the primary sensitivity
+measure for the constrained design, developed in Section~\ref{sec:sobol}.
 \end{itemize}
 The output metric is the \textbf{mean peak wind over the 682 land vertices}
-(loss-cost is the additional metric in Section~\ref{sec:loss}). The computed
-SRCs and faithful EPRs reproduce the ROA's findings: WSP dominates for
-Category~1 while Rmax grows to dominate for Category~5 (faithful EPR: Cat~1
-WSP~$\approx54\%$, Cat~5 Rmax~$\approx57\%$), with CP negative and CF, FFP, Rmax
-positive (Figure~\ref{fig:analysis}).
+(loss-cost is the additional metric in Section~\ref{sec:loss}).
+
+\paragraph{The headline result of lumping: central pressure dominates.}
+On the constrained population, in the viewer's shipped default land configuration
+(roughness + Kaplan--DeMaria decay), \textbf{CP is the leading driver} of both peak
+wind and loss cost (Shapley share $\approx0.45$ and $\approx0.51$; $R_{\max}$ second at
+$\approx0.29$ and $\approx0.21$), with the Sobol' cross-check agreeing on the leaders
+(Section~\ref{sec:sobol}). This overturns the legacy per-category picture---in which
+WSP dominates Cat~1 and $R_{\max}$ dominates Cat~5---for a simple reason: fixing a
+Saffir--Simpson category nearly fixes CP, so within a category CP \emph{cannot}
+express its influence. Lumping the categories into one population lets CP vary over
+its full realistic range, and it immediately emerges as the dominant control on the
+footprint. Figure~\ref{fig:analysis} shows the single-population SRC and EPR bars.
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.49\textwidth]{analysis_src.png}\hfill
 \includegraphics[width=0.49\textwidth]{analysis_epr.png}
-\caption{Sensitivity (SRC, left) and uncertainty (EPR, right) for the Powell
-model, plotted by hurricane category---the interactive analogues of ROA
-Figs.~9--10. The windows are independently movable and resizable.}
+\caption{Sensitivity (SRC, left) and uncertainty (EPR, right) for the Powell model
+on the constrained $n=200$ population, shipped default land configuration---the
+interactive analogues of ROA Figs.~9--10, now single-population bars rather than
+per-category lines. CP is the largest SRC in magnitude (negative: a deeper low, a
+lower CP, raises the wind); the EPR bars are the corresponding $\text{SRC}_i^2$
+variance shares. The windows are independently movable and resizable.}
 \label{fig:analysis}
 \end{figure}
 
-\section{Statistics: Sobol' indices (variance-based SA)}\label{sec:sobol}
+\section{Statistics: Shapley effects and the Sobol' cross-check}\label{sec:sobol}
 SRC is a \emph{first-order, linear} measure: it fits a plane through the response
 and reports the slopes. If the response bends, or if two inputs act jointly, SRC
-cannot see it. \textbf{Sobol' indices} \cite{sobol} answer the same question
-(``how is output uncertainty apportioned among the inputs?'') without assuming
-linearity, by decomposing the output \emph{variance} rather than fitting a line.
-Following the functional ANOVA decomposition,
+cannot see it. Variance-based sensitivity answers the same question (``how is output
+uncertainty apportioned among the inputs?'') without assuming linearity, by
+decomposing the output \emph{variance} rather than fitting a line. On the constrained
+design one prior obstacle dictates \emph{which} variance-based method is admissible.
+
+\paragraph{Dependence rules out plain Sobol', and Shapley resolves it.}
+The constrained population is sampled to reproduce HURDAT2's couplings, so its inputs
+are correlated by construction---most strongly CP with $R_{\max}$ ($r=0.43$), and $B$
+with $R_{\max}$ through Powell's Eq.~7. Classical \textbf{Sobol' indices}
+\cite{sobol} assume \emph{independent} inputs; under dependence the variance no
+longer splits cleanly and the indices lose their apportionment meaning (variance
+shared through the correlation is double-counted, and $\sum_i S_i$ need not approach
+one). The \textbf{Shapley effect} \cite{owen2014,song2016} restores a clean
+apportionment by borrowing the Shapley value from cooperative game theory: each input
+is a ``player,'' each subset of inputs has a ``worth'' equal to the output variance it
+explains, and input $i$ is credited with its average marginal worth over all orderings
+in which it can be added. The six shares are non-negative and sum \emph{exactly} to
+one whether or not the inputs are correlated---the property plain Sobol' loses. We
+estimate them with the given-data $k$-nearest-neighbour estimator of Broto, Bachoc,
+and Depecker \cite{broto2020} ($k=40$, five replicates) over $2\times10^{4}$ IID draws
+from the constrained joint distribution scored by the GPR emulator of
+Section~\ref{sec:metamodel}.
+
+\paragraph{Result: central pressure dominates, and the cross-check agrees on the leaders.}
+Table~\ref{tab:shapley} gives the constrained Shapley shares beside the Sobol' indices
+computed the classical way (sampling the same marginals \emph{independently}), both in
+the shipped default land configuration. The two agree on the leaders---CP first,
+$R_{\max}$ second---which is the reassurance the two-method design was built to give.
+They part company on VT and $B$, the two inputs most entangled with the rest: with
+Kaplan--DeMaria decay active, translation speed governs the storm's inland dwell time,
+and the given-data Shapley (evaluated on the true joint sample) credits VT a $0.12$
+share where the independent-input Sobol' reference sees only $0.03$; conversely $B$,
+coupled to $R_{\max}$ by construction, carries a larger \emph{independent}-sampling
+Sobol' share ($0.10$ total) than its dependence-aware Shapley value ($0.06$). Both
+departures point the way the dependence structure predicts---which is the reason a
+dependence-aware primary measure is needed at all.
+
+\begin{table}[H]
+\centering\footnotesize
+\caption{Sensitivity on the constrained $n=200$ population for peak wind, in the
+viewer's shipped default land configuration (Powell + surface roughness +
+Kaplan--DeMaria decay): dependence-aware \textbf{Shapley} shares (which sum to one)
+beside the classical \textbf{Sobol'} first-order $S_i$ and total $S_{Ti}$ indices, the
+latter an independent-input reference. Both rank CP first and $R_{\max}$ second; the
+methods diverge on VT (a decay/dwell effect the given-data Shapley credits) and $B$
+(the $B$--$R_{\max}$ coupling the independent-input Sobol' over-credits).}
+\label{tab:shapley}
+\begin{tabular}{lrrr}
+\toprule
+input & Shapley & Sobol' $S_i$ & Sobol' $S_{Ti}$\\
+\midrule
+CP        & \textbf{0.450} & \textbf{0.546} & \textbf{0.554}\\
+$R_{\max}$& 0.293 & 0.295 & 0.352\\
+VT        & 0.117 & 0.015 & 0.028\\
+$B$       & 0.058 & 0.066 & 0.099\\
+CF        & 0.058 & 0.029 & 0.024\\
+FFP       & 0.025 & 0.006 & 0.004\\
+\midrule
+\multicolumn{4}{l}{\footnotesize Shapley sum $=1.000$ \hfill $\sum_i S_i = 0.956$\hfill}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.62\textwidth]{analysis_shapley.png}
+\caption{Shapley effects for peak wind on the constrained $n=200$ population (GPR
+emulator, shipped default land configuration), the whisker $\pm2$ standard errors.
+CP dominates and the six shares sum to one by construction---the property that keeps
+the apportionment meaningful under the design's input dependence. Reached from
+\textbf{Sensitivity} via the SRC\,/\,Shapley method tabs.}
+\label{fig:shapley}
+\end{figure}
+
+The Sobol' cross-check itself follows the functional ANOVA decomposition,
 \[
 \mathrm{Var}[f(\mathbf{x})]=\sum_i \mathrm{Var}[f_i(x_i)]
  +\sum_{i<j}\mathrm{Var}[f_{ij}(x_i,x_j)]+\cdots ,
@@ -771,60 +969,129 @@ of interaction---precisely the information SRC discards. Likewise
 $\sum_i S_i < 1$ signals that the main effects do not account for the whole
 variance, the shortfall being interaction.
 
-\paragraph{Why an emulator is required.} Sobol' estimation is Monte-Carlo and needs
-far more model evaluations than the $100$ Form S-6 vectors provide. The standard
-remedy, and the one recommended in the practitioner review of Francom and
+\paragraph{Why an emulator is required.} Both the Shapley and Sobol' estimators are
+Monte-Carlo and need far more model evaluations than the $200$ storms provide. The
+standard remedy, and the one recommended in the practitioner review of Francom and
 Nachtsheim \cite{francom}, is to fit an \emph{emulator} to the available runs and
-compute the indices on \emph{it}. We do exactly that: the indices are evaluated on
-the Gaussian-process metamodel of Section~\ref{sec:metamodel}, using the Saltelli
-\cite{saltelli2010} estimator for $S_i$ and the Jansen \cite{jansen1999} estimator
-for $S_{Ti}$, at $n=262{,}144$ samples averaged over three independent replicates.
-A separate emulator is fit for \emph{each land configuration}---surface roughness
-alone, and roughness with Kaplan--DeMaria decay---so the reported indices always
-describe the configuration actually selected in the viewer. Decay makes the response
-\emph{more} interactive, as one would expect of an added nonlinear process: for
-Cat~1 loss cost, $\sum_i S_i$ falls from $0.90$ to $0.83$ when it is switched on.
+compute the indices on \emph{it}. We do exactly that: both are evaluated on the
+Gaussian-process metamodel of Section~\ref{sec:metamodel}---Shapley on the constrained
+joint distribution, Sobol' with the Saltelli \cite{saltelli2010} estimator for $S_i$
+and the Jansen \cite{jansen1999} estimator for $S_{Ti}$ at $n=131{,}072$ over ten
+replicates. For Sobol', $S_i$, $S_{Ti}$ and the pairwise $S_{ij}$ are read off the
+\emph{same} sample, so the $S_i$ that $S_{ij}=S^{\text{closed}}_{ij}-S_i-S_j$
+subtracts is the very estimate reported next to it and its sampling error cancels
+rather than compounding. A separate emulator is fit for \emph{each land
+configuration}---surface roughness alone, and roughness with Kaplan--DeMaria
+decay---so the reported indices always describe the configuration selected in the
+viewer; decay makes the response more interactive, and it shifts VT from a bystander
+to a first-order driver (below).
 
-\paragraph{Assumptions, checked.} Sobol' requires \emph{independent} inputs and an
-explicit input distribution. Both were verified rather than assumed. The six inputs
-are effectively uncorrelated (largest $|r|$ across the $15$ pairs is $0.04$ for
-Cat~1 and $0.05$ for Cat~3; Cat~5 shows a mild $r=+0.29$ between CP and $R_{\max}$,
-about $2.9\sigma$ at $n=100$ and consistent with Latin-hypercube sampling noise).
-Their marginals are \emph{uniform} over the sampled ranges (Kolmogorov--Smirnov
-$p=0.11$, $0.06$, $0.16$, and $1.00$ for CP, $R_{\max}$, VT, and WSP/CF/FFP), so
-sampling the Sobol' design uniformly on the observed box is the correct reference
-measure. A convergence check was also necessary: at the naive $n=2048$ the
-estimates still drifted by $\sim$$0.05$---as large as the interaction effect they
-were meant to detect---so the sample size was raised until the Monte-Carlo error
-fell an order of magnitude below the signal.
+\paragraph{The reference measure, and why Shapley leads.} The Sobol' cross-check
+deliberately samples the six marginals \emph{independently}: that is the reference
+measure under which its variance decomposition is defined, and it is exactly the
+counterfactual ``what would each input explain if it varied on its own?''. The real
+constrained population is \emph{not} independent---CP and $R_{\max}$ carry $r=0.43$,
+and $B$ is tied to $R_{\max}$ by construction---which is why the dependence-aware
+Shapley effect is the primary measure and Sobol' the check, not the reverse. A
+convergence check was still necessary for both: at a naive $n=2048$ the Sobol'
+estimates drifted by $\sim$$0.05$---as large as the interaction they were meant to
+detect---so the sample size was raised until the Monte-Carlo error fell an order of
+magnitude below the signal.
 
-\paragraph{Result: the model is nearly additive, with one real interaction.}
-Across all three categories and both responses, $\sum_i S_i$ lands between $0.90$
-and $0.97$: the main effects alone explain $90$--$97\%$ of the output variance, so
-the response is \emph{mostly} additive and SRC is not badly wrong. But the
-remaining $3$--$10\%$ is genuine interaction, and it is not spread evenly. The gap
-$S_{Ti}-S_i$ is significant (above its Monte-Carlo error) for $R_{\max}$ and WSP,
-and the second-order indices localise it precisely: $S_{ij}$ for the
-$R_{\max}\times$WSP pair is $+0.02$ to $+0.05$, an order of magnitude larger than
-any other pair, which sit at $\approx 0$. The storm's size and its wind-profile
-shape act on the loss \emph{jointly}---which is exactly what the interaction matrix
-(Figure~\ref{fig:matrix}) shows by eye, and what a linear SRC cannot express.
+\paragraph{Result: nearly additive, with the design's own couplings as the
+interactions.} On the constrained population the main effects already explain almost
+everything: $\sum_i S_i=0.956$ for peak wind, so the response is close to additive and
+SRC is not badly wrong. The small remainder is genuine interaction and sits exactly
+where the design put it---the two largest pairwise indices are CP\,$\times R_{\max}$
+($0.025$) and $R_{\max}\times B$ ($0.020$), the very couplings the constrained
+sampling introduced, with every other pair near zero. Size and profile shape act on
+the loss \emph{jointly}, which is what the interaction matrix
+(Figure~\ref{fig:matrix}) shows by eye and a linear SRC cannot express.
+
+\paragraph{The full pairwise decomposition (legacy baseline).} The constrained run
+reports main and total indices; to see a \emph{complete} pairwise Sobol'
+decomposition---and to watch the method localise an interaction to a single cell---it
+helps to look at the legacy independent-inputs 3-category design, whose shape input is
+the ROA quantile WSP. Table~\ref{tab:sobol} reports it for Cat~5 peak wind: for every
+input, its total sensitivity $S_{Ti}$, its main effect $S_i$, and its pairwise
+$S_{ij}$ against each of the other five. $R_{\max}$ carries a main effect of $0.64$
+and a total of $0.69$; the entire $0.04$ gap is one cell, its interaction with WSP.
+WSP itself is the mirror image---main effect $0.15$, total $0.20$, the same $R_{\max}$
+cell accounting for the difference. Every other pair is either negligible
+($\le 0.0013$) or not resolved from zero: the model is additive in five of its six
+inputs and interactive in exactly one place. (That this baseline makes $R_{\max}$, not
+CP, the leader is precisely the per-category artefact the constrained lumping was
+built to remove.)
+
+The one input whose behaviour repays a second look is VT. With decay switched on it
+carries $S_i=0.043$, against $0.006$ for roughness alone---a seven-fold rise, and the
+largest proportional change any input undergoes between the two land configurations.
+That is not a numerical artefact but the physics: Kaplan--DeMaria decay accumulates
+over the time the circulation spends inland, so how \emph{fast} the storm crosses the
+peninsula starts to matter the moment decay is modelled at all, and cannot matter
+before. A translation speed that is irrelevant to the steady footprint becomes a
+first-order driver of the decayed one.
+
+\begin{table}[H]
+\centering\footnotesize
+\setlength{\tabcolsep}{5pt}
+\caption{Sobol' indices for Cat~5 peak wind on the GPR emulator, computed on the
+\emph{legacy} independent-inputs 3-category design (shape input WSP), in the viewer's
+shipped default land configuration (Powell + surface roughness + Kaplan--DeMaria
+decay)---the same configuration as Figure~\ref{fig:sobol}, so the two may be read
+against each other. Columns: total sensitivity $S_{Ti}$, main effect $S_i$, and the
+pure two-factor index $S_{ij}$ against each other input; the $S_{ij}$ matrix is
+symmetric and its diagonal is undefined. Estimated by Monte Carlo---Saltelli for
+$S_i$, Jansen for $S_{Ti}$---at $n=131{,}072$ over $10$ independent replicates, all
+three indices taken from the same sample so that the $S_i$ subtracted inside $S_{ij}$
+is the $S_i$ reported beside it. The Monte-Carlo standard error is $0.0015$ on the
+$R_{\max}\times$WSP cell and $\le 0.0004$ on every other, so \textbf{one interaction
+in this table is real} and the rest are zero to within sampling noise. Two
+consequences of that noise are visible and worth stating plainly: two totals sit a
+hair \emph{below} their own main effect (CP, FFP, by $\le 0.0005$), which is
+impossible in exact arithmetic and simply means those inputs interact with nothing;
+and the higher-order ($3+$ way) residual $1-\sum_i S_i-\sum_{i<j}S_{ij} = -0.004$,
+i.e.\ zero within error. There is no detectable three-way structure.}
+\label{tab:sobol}
+\begin{tabular}{lrrrrrrrr}
+\toprule
+ & \multicolumn{2}{c}{sensitivity} & \multicolumn{6}{c}{interaction $S_{ij}$ with}\\
+\cmidrule(lr){2-3}\cmidrule(lr){4-9}
+input & total $S_{Ti}$ & main $S_i$ & CP & $R_{\max}$ & VT & WSP & CF & FFP\\
+\midrule
+CP        & 0.0195 & 0.0200 & --- & 0.0005 & 0.0001 & 0.0002 & 0.0001 & 0.0000\\
+$R_{\max}$& 0.6856 & 0.6449 & 0.0005 & --- & $-0.0001$ & \textbf{0.0425} & 0.0013 & 0.0001\\
+VT        & 0.0459 & 0.0434 & 0.0001 & $-0.0001$ & --- & 0.0005 & 0.0004 & 0.0000\\
+WSP       & 0.1988 & 0.1490 & 0.0002 & \textbf{0.0425} & 0.0005 & --- & 0.0006 & 0.0002\\
+CF        & 0.0878 & 0.0871 & 0.0001 & 0.0013 & 0.0004 & 0.0006 & --- & 0.0000\\
+FFP       & 0.0126 & 0.0129 & 0.0000 & 0.0001 & 0.0000 & 0.0002 & 0.0000 & ---\\
+\midrule
+\multicolumn{9}{l}{\footnotesize $\sum_i S_i = 0.957$ \hfill $\sum_{i<j} S_{ij} = 0.047$
+\hfill higher-order residual $=-0.004$ (zero within error) \hfill}\\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.62\textwidth]{analysis_sobol.png}
-\caption{Sobol' indices for Cat~5 peak wind, computed on the GPR emulator. Each bar
-is an input: the solid part is the main effect $S_i$, the shaded cap is the
-interaction $S_{Ti}-S_i$, and the whisker is $\pm2$ Monte-Carlo standard errors.
-$R_{\max}$ dominates; WSP carries the largest interaction share. The panel is
-reached from \textbf{Sensitivity} via the SRC\,/\,Sobol' method tabs, so the two
-methods sit one click apart.}
+\caption{Sobol' indices for Cat~5 peak wind (legacy independent-inputs baseline),
+computed on the GPR emulator. Each bar is an input: the solid part is the main effect
+$S_i$, the shaded cap is the interaction $S_{Ti}-S_i$, and the whisker is $\pm2$
+Monte-Carlo standard errors. $R_{\max}$ dominates and WSP carries the largest
+interaction share \emph{on this baseline}; on the constrained population CP leads
+(Table~\ref{tab:shapley}). The panel is reached from \textbf{Sensitivity} via the
+SRC\,/\,Shapley method tabs, with the Sobol' reference alongside.}
 \label{fig:sobol}
 \end{figure}
 
 \subsection{Verification: an independent Sobol' analysis in JMP}\label{sec:jmpcheck}
-The Sobol' machinery above was verified against an entirely separate
-implementation. A statistician, working independently in \textbf{JMP}, exported the
+The Sobol' machinery above was verified against an entirely separate implementation.
+(This cross-check was run on the legacy independent-inputs baseline---where Sobol'
+indices are exactly valid and JMP's platform computes them directly---so it verifies
+the \emph{estimator}, which is what a verification should isolate; the numbers below
+are in that baseline's terms, shape input WSP.) A statistician, working independently
+in \textbf{JMP}, exported the
 per-vertex loss-cost table for the Boynton Beach vertex $(\mathrm{ew},\mathrm{ns})=(6,45)$
 ---the $100$ input vectors against $\%\mathrm{LC}$ at that point---fitted JMP's own
 Gaussian-process model, and read off the Sobol' indices its platform derives
@@ -890,28 +1157,34 @@ this section is responsible for.
 
 \paragraph{A vertex is a fingerprint.} The agreement also identifies the vertex beyond
 doubt, which is worth noting because the indices are so location-specific. At $(6,45)$,
-$R_{\max}$ carries $S_i=0.82$; at the nearby Dania Beach vertex it is $0.63$, at Key
-Biscayne $0.37$, and \emph{on} the track it collapses to $0.02$. No other vertex comes
-within $0.10$ of JMP's numbers.
+$R_{\max}$ carries $S_i=0.83$; at the nearby Dania Beach vertex it is $0.67$, at Key
+Biscayne $0.42$, and \emph{on} the track it collapses to $0.02$. No other vertex comes
+within $0.10$ of JMP's numbers. (These four are recomputed with the single-sample
+estimator of Section~\ref{sec:sobol}; the vertices are the five §3.1.4 locations, so
+they reappear in the hold-out test of Section~\ref{sec:holdout}.)
 
 \paragraph{And the physics is instructive.} Boynton Beach sits $45$\,mi \emph{north} of
 the track. The only question that matters there is whether the storm's wind field
 \emph{reaches} that far---which is precisely what $R_{\max}$ governs, hence
 $S_{R_{\max}}=0.82$. Whether the eyewall is sharply peaked (WSP) is nearly irrelevant
-at that distance, and WSP duly collapses to $0.008$. This is the \emph{inverse} of the
-footprint-level ranking of Section~\ref{sec:sobol}, where WSP is a leading driver. One
-off-track vertex overturns the domain-wide answer, which is the clearest possible
-argument for the single-point profiler of Section~\ref{sec:metamodel} existing at all.
+at that distance, and WSP duly collapses to $0.008$. This inverts that baseline's
+footprint-level ranking, where the shape parameter is a leading driver. One off-track
+vertex overturns the domain-wide answer, which is the clearest possible argument for
+the single-point profiler of Section~\ref{sec:metamodel} existing at all.
 
 \section{Statistics: Metamodels and the interaction profiler}\label{sec:metamodel}
 The standardized regression coefficients of Section~\ref{sec:sa} treat the
 input--output map as \emph{first order}: each input acts independently and
-linearly. The Sobol' analysis of Section~\ref{sec:sobol} shows this is not quite
-true---$3$--$10\%$ of the output variance is interaction, concentrated in the
-$R_{\max}\times$WSP pair---which motivates replacing the linear fit with a flexible
-\emph{metamodel} (response surface, Gaussian-process regression, or neural
-network) examined through an interaction \emph{profiler}. The viewer implements
-this directly.
+linearly. The variance-based analysis of Section~\ref{sec:sobol} shows this is not
+quite true---a few percent of the output variance is interaction, sitting in the
+design's own couplings ($R_{\max}\times B$, CP\,$\times R_{\max}$)---which motivates
+replacing the linear fit with a flexible \emph{metamodel} (response surface,
+Gaussian-process regression, or neural network) examined through an interaction
+\emph{profiler}. The viewer implements this directly. (The worked numeric examples in
+this section and the JMP cross-check above are drawn from the legacy independent-inputs
+baseline, where the shape input is the ROA quantile WSP; they illustrate the
+\emph{machinery}---emulator fit, profiler, interaction matrix---which is identical on
+the constrained design.)
 
 \paragraph{Response variable.}
 A \textbf{Response (Y)} selector chooses the scalar output that every analysis
@@ -953,8 +1226,8 @@ statistician's point: the quantity of interest is an aggregate over the grid poi
 of a \emph{given} vector, and different aggregates are different questions.
 
 \paragraph{Second-order metamodel.}
-For the profiler the viewer fits, per category, a standardized second-order
-response surface in the six inputs $z_k=(X_k-\bar X_k)/s_{X_k}$,
+For the profiler the viewer fits, over the 200-storm population, a standardized
+second-order response surface in the six inputs $z_k=(X_k-\bar X_k)/s_{X_k}$,
 \[
 \hat Y=b_0+\sum_{k} b_k z_k+\sum_{k} b_{kk} z_k^{2}
         +\sum_{j<k} b_{jk}\,z_j z_k ,
@@ -1135,10 +1408,11 @@ reflects terrain roughness modulating the surface wind.}
 \end{figure}
 
 \paragraph{Loss-cost distribution.}
-A companion panel plots the empirical CDF of $\%\text{TLC}(i)$ over the $100$
-vectors for the selected category (the ROA's Fig.~5 analogue), summarizing the
-spread of simulated loss cost. For Category~5 (Figure~\ref{fig:tlccdf}) the loss
-cost ranges from roughly $14\%$ to $53\%$ of exposure with a mean near $33\%$.
+A companion panel plots the empirical CDF of $\%\text{TLC}(i)$ over the $200$
+storms of the constrained population (the ROA's Fig.~5 analogue), summarizing the
+spread of simulated loss cost across the whole population in a single curve
+(Figure~\ref{fig:tlccdf})---no longer stratified by category, since the lumped design
+mixes all intensities into one distribution.
 
 \begin{figure}[H]
 \centering
@@ -1238,7 +1512,10 @@ Powell simulator is a smooth, deterministic function of the six inputs, all thre
 metamodels reach $R^2\approx1$ and their profiles nearly coincide; this agreement
 is itself the result---three independent methods recovering the same main effects
 and interaction curvature is strong evidence the structure is real, and confirms
-that a second-order surface already suffices here. The added value of GPR/NN is
+that a second-order surface already suffices here. These are in-sample and
+cross-validated figures, however, which Form S-6 §3.2.2 regards as insufficient on
+their own; Section~\ref{sec:holdout} tests the same metamodels on $30$ storms they
+have never seen and confirms the claim holds there too. The added value of GPR/NN is
 diagnostic rather than predictive: the GPR's ARD length scales rank the inputs by
 influence, and its variance function yields Sobol \emph{total-effect} indices
 $S_{T_i}$ (main effect plus all interactions involving $X_i$), which replace the
@@ -1256,22 +1533,163 @@ validates the recovered effect/interaction structure.}
 \label{fig:compare}
 \end{figure}
 
+\subsection{Testing on unseen storms (Form S-6 §3.2.2)}\label{sec:holdout}
+Every number in the paragraph above, and every $R^2$ in Figure~\ref{fig:compare}, is
+either in-sample or cross-validated. Form S-6 §3.2.2 is explicit that this is not
+enough: training and validation are not independent, because feedback from validation
+changes the model, so a final metamodel ``should be tested on hold-out data that has
+not been employed either in the training or validation phases.'' Our 5-fold CV $R^2$ is
+a \emph{validation} number---its folds are all drawn from the same $100$ vectors the
+GPR was fit on---and it cannot answer the question that actually matters: \emph{how
+well does this metamodel predict a storm it has never seen?}
+
+This matters far beyond the profiler. Every Sobol' index in Section~\ref{sec:sobol} is
+computed \emph{on the emulator}, not on the physics---with only $100$ runs there is no
+alternative, and it is the procedure Francom and Nachtsheim \cite{francom} recommend.
+The entire sensitivity analysis therefore rests on the emulator being able to predict
+storms outside its training set. Until now nothing established that.
+
+\paragraph{The test design.} A \textbf{30-run maximin Latin hypercube} per category
+(\texttt{pipeline/make\_test\_design.py}), one of the design families §3.1.3 lists
+explicitly: many candidate LHDs are drawn and the one maximising the minimum pairwise
+distance is kept, so the test storms spread evenly instead of clumping by chance. The
+box is the min/max of the $100$ training vectors, so every test point
+\emph{interpolates}---a hold-out that extrapolated would be asking a harsher question
+than §3.2.2 poses. The closest test storm lies $0.13$--$0.21$ (scaled) from any
+training storm: these are genuinely new storms, not near-duplicates.
+
+Each of the $90$ test vectors ($30\times3$ categories) is then pushed through the
+\emph{real} catastrophe model---the same vendored Powell PDE solver, roughness field,
+and vulnerability curves that produced the training data ($228$\,s;
+\texttt{windfield\_grid.py --inputs inputs\_test.json}). The metamodels are loaded from
+\texttt{metamodels.json} \textbf{exactly as shipped and never refit}. Refitting, or
+even re-tuning, against the test points would quietly turn the test back into a
+validation and make the reported $R^2$ optimistic.
+
+\paragraph{Result: the metamodels predict unseen storms.} Table~\ref{tab:holdout}
+reports §3.2.2's statistics for \%TLC---the Form S-6 response, uniform \$100{,}000
+exposure per §3.1.1. Predicted $R^2$ is $0.9995$--$0.9998$ for the GPR and
+$0.995$--$0.9996$ for the network. The prediction standard deviation $s_{\text{pred}}$
+is $0.10$--$0.23$ percentage points of total loss cost, and the $95\%$ prediction
+intervals cover $90$--$100\%$ of the held-out storms against a nominal $95\%$: the
+error bars are honest, neither over- nor under-confident.
+
+\begin{table}[H]
+\centering\footnotesize
+\caption{Form S-6 §3.2.2 hold-out test of \%TLC on $30$ unseen storms per category.
+$R^2_{\text{pred}}$ and $s_{\text{pred}}$ are computed from residuals on data used in
+neither training nor validation; $\bar y$ is the mean of the $30$ \emph{new} responses,
+per §3.2.2. The cross-validated $R^2$ is shown alongside for contrast---it is the
+number §3.2.2 says is insufficient. Both statistics are defined for \emph{any}
+metamodel, which is why the network is scored by the identical procedure.}
+\label{tab:holdout}
+\begin{tabular}{llrrrrr}
+\toprule
+ & & \multicolumn{2}{c}{$R^2$} & & &\\
+\cmidrule(lr){3-4}
+response & model & \multicolumn{1}{c}{predicted} & \multicolumn{1}{c}{cross-val.}
+ & $s_{\text{pred}}$ & $95\%$ PI & coverage\\
+\midrule
+\%TLC Cat 1 & GPR & 0.9995 & 1.000 & 0.104 & $\pm0.212$ & 1.00\\
+            & NN  & 0.9946 & 0.997 & 0.352 & $\pm0.721$ & 0.93\\
+\%TLC Cat 3 & GPR & 0.9998 & 1.000 & 0.159 & $\pm0.326$ & 0.93\\
+            & NN  & 0.9994 & 0.998 & 0.277 & $\pm0.566$ & 0.93\\
+\%TLC Cat 5 & GPR & 0.9996 & 0.999 & 0.227 & $\pm0.464$ & 0.90\\
+            & NN  & 0.9996 & 0.998 & 0.255 & $\pm0.522$ & 0.93\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{The test is method-agnostic, and that is the point.} §3.2.1 leaves the
+choice of metamodel to the modeling organization---GPR, neural nets, regression trees,
+second-order regression. A GPR additionally supplies an \emph{analytic} predictive
+standard deviation, and it is tempting to report that as the uncertainty measure. It
+would be a mistake to \emph{require} it: as the statistician put it, ``that's a GPR
+capability that other methods lack.'' An organization fitting a random forest could
+not comply. §3.2.2's construction avoids this entirely---$R^2_{\text{pred}}$ and
+$s_{\text{pred}}$ are computed from \emph{residuals on held-out data}, so they are
+defined for any metamodel whatsoever. Table~\ref{tab:holdout} demonstrates the point
+by scoring our neural network, which exposes no native uncertainty at all, by the
+identical procedure: it yields valid prediction intervals regardless. The requirement
+is satisfiable by any modeling organization, which is presumably why it is written the
+way it is.
+
+\paragraph{Location-level \%LC.} §3.2.2's formulas are written for $\%LC_c(i,x,y)$ at
+the five locations of §3.1.4---which are the app's starred Points of Interest. The
+footprint metamodels are aggregates over $682$ vertices and cannot answer a
+location-level question, so a GPR is fit \emph{per vertex} (the $100$ training vectors
+against \%LC at that vertex) and scored on the same $30$ unseen storms. Before
+believing any of it, the per-vertex fit was required to reproduce the Sobol'
+$S_1(R_{\max})$ already established at three of these vertices---including Boynton
+Beach, the vertex independently verified against JMP in Section~\ref{sec:jmpcheck}. It
+does: $0.827$ against $0.82$ at Boynton Beach, $0.670$ at Dania Beach, $0.417$ at Key
+Biscayne. It is the same model.
+
+\begin{table}[H]
+\centering\footnotesize
+\caption{Hold-out predicted $R^2$ for \%LC at the five §3.1.4 locations (GPR, per-vertex,
+$30$ unseen storms). The two \emph{on-track} vertices are predicted almost perfectly;
+the three off-track vertices are measurably harder, and the pattern is physical---see
+the text.}
+\label{tab:holdoutpts}
+\begin{tabular}{llrrrr}
+\toprule
+ & & \multicolumn{3}{c}{predicted $R^2$} & worst\\
+\cmidrule(lr){3-5}
+§3.1.4 & location & Cat 1 & Cat 3 & Cat 5 & $s_{\text{pred}}$\\
+\midrule
+Location 1 & Dania Beach $(9,15)$        & 0.971 & 0.998 & 0.994 & 1.12\\
+Location 2 & Pinewood $(15,0)$ \emph{on-track}      & 0.999 & 1.000 & 0.999 & 0.26\\
+Location 3 & Kendall West $(60,0)$ \emph{on-track}  & 0.999 & 1.000 & 0.999 & 0.27\\
+Location 4 & Key Biscayne $(12,-12)$     & 0.992 & 0.996 & 0.992 & 1.39\\
+Location 5 & Boynton Beach $(6,45)$      & 0.990 & 1.000 & 0.999 & 0.23\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Where the metamodel is weakest, and why.} Table~\ref{tab:holdoutpts} carries
+a result worth stating rather than burying: \textbf{the emulator is least precise
+exactly where the loss is smallest}. Both \emph{on-track} vertices are predicted at
+$R^2\ge0.999$, while the three \emph{off-track} vertices---Dania Beach at Cat~1
+($0.971$), Boynton Beach at Cat~1 ($0.990$), Key Biscayne ($0.992$)---are measurably
+harder. The physics explains it. On the track the site is deep inside the wind field
+and the response is saturated and smooth. Off the track, the only question is whether
+the wind field \emph{reaches} that far, which is a near-threshold, sharply nonlinear
+regime governed by $R_{\max}$---the same effect that drives $S_1(R_{\max})$ to $0.83$ at
+Boynton Beach while it collapses to $0.02$ on the track. A threshold is harder to
+emulate than a plateau. The absolute errors remain small ($s_{\text{pred}}\le1.4$
+percentage points of \%LC), but a reviewer should know that the metamodel's precision
+is not uniform over the domain, and where it thins.
+
+\paragraph{The result was checked against being too good.} A predicted $R^2$ of
+$0.9998$ invites suspicion, because a plumbing error that silently scored the metamodel
+against its own \emph{training} data would produce exactly that---and predicted $R^2$
+alone cannot tell the two apart. Three negative controls separate them. Permuting the
+test inputs, so that each prediction is matched to the wrong storm's truth, collapses
+predicted $R^2$ to $-1.62$. Scoring the Cat~5 metamodel against Cat~1 truth gives
+$-38.3$. And the nearest test vector sits $1.81$ (raw units) from the closest training
+vector, so no test point is a disguised copy of a training point. The metamodel really
+does reproduce the catastrophe model on storms it has never seen; the response is a
+smooth deterministic function of six inputs, which is precisely the regime in which
+emulation is supposed to work, and here it demonstrably does.
+
 \subsection{Grid-point-level sensitivity}
 The SRC/EPR analyses above summarize the land-mean response. The deck also
 recommends sensitivity \emph{at the grid-point level}, before averaging. The
 \textbf{Sensitivity (dominant input)} colour mode does exactly this: at each land
-vertex it regresses that vertex's peak wind over the 100 vectors on the six
+vertex it regresses that vertex's peak wind over the 200 storms on the six
 standardized inputs and colours the vertex by its dominant input
 (Figure~\ref{fig:gridsens}). The result is a spatial map of which storm parameter
-controls the hazard where---e.g.\ for Category~1 the radius of maximum winds
-$R_{\max}$ dominates the northern band while WSP dominates elsewhere---information
-that a single grid-averaged table cannot convey.
+controls the hazard where---the dominant parameter varies spatially across the grid
+(the radius of maximum winds $R_{\max}$ controls one band while central pressure or
+profile shape dominate elsewhere)---information that a single grid-averaged table
+cannot convey.
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.8\textwidth]{grid_sensitivity.png}
-\caption{Grid-point-level sensitivity (Category~1, Powell): each land vertex
-coloured by its dominant input from a per-vertex standardized regression. The
+\caption{Grid-point-level sensitivity (constrained population, Powell): each land
+vertex coloured by its dominant input from a per-vertex standardized regression. The
 dominant parameter varies spatially across the grid.}
 \label{fig:gridsens}
 \end{figure}
@@ -1285,7 +1703,7 @@ left, is modified by the land effects, and is then carried through the three
 classical catastrophe-model stages---hazard, vulnerability, and loss costs.
 Figure~\ref{fig:activity} refines that flow into a UML activity diagram, showing
 the actual order of evaluation, the decision points at which a model is swapped,
-and the loop over the 100 Form S-6 input vectors.
+and the loop over the 200 constrained-design input vectors.
 
 \begin{figure}[H]
 \centering
@@ -1314,7 +1732,7 @@ vulnerability against exposure yields loss costs.}
   % ---------------- Hazard ----------------
   \node[umlinit]  (start) at (0,0)      {};
   \node[umlact]   (pick)  at (0,-1.2)   {Select input vector $i$\\
-                                         (CP, $R_{\max}$, VT, WSP, CF, FFP)};
+                                         (CP, $R_{\max}$, VT, $B$, CF, FFP)};
   \node[umldec]   (dmod)  at (0,-2.9)   {Wind-field\\model?};
   \node[umlalt]   (hol)   at (-4.4,-4.5){Holland\\\emph{gradient profile}};
   \node[umlalt]   (wil)   at (0,-4.5)   {Willoughby\\\emph{power law}};
@@ -1401,29 +1819,30 @@ vulnerability against exposure yields loss costs.}
 families appear as decision nodes with guarded branches---wind field (hazard),
 damage curve (vulnerability), and exposure (actuarial)---which is what makes the
 app a \emph{multimodel}. Water vertices bypass the land effects and keep marine
-winds. The outer loop repeats the pass for each of the 100 input vectors, after
-which the SRC and EPR statistics of Section~\ref{sec:sa} are computed.}
+winds. The outer loop repeats the pass for each of the 200 input vectors, after
+which the SRC, EPR, and Shapley statistics of Section~\ref{sec:sa} are computed.}
 \label{fig:activity}
 \end{figure}
 
 \subsection{Interface}
-The viewer offers model / category / input-vector selection (the input vector
-chooses one of the 100 randomized storms for the category), the WSP$\to B$
-distribution control (which now reshapes only the live single-point profiler,
-since all footprint windfields are precomputed at the default Uniform mapping),
-the \textbf{Land model} checkboxes
-(surface roughness and/or Kaplan--DeMaria decay, both on by default; neither =
-marine), a colour-by control
+The viewer offers model and input-vector selection---the input-vector slider chooses
+one of the \emph{200} storms of the constrained population; there is no category
+selector, because the lumped design is a single population---the \textbf{Land model}
+checkboxes (surface roughness and/or Kaplan--DeMaria decay, both on by default;
+neither = marine), a colour-by control
 (peak wind, loss MDR, land/water, or grid-point dominant-sensitivity), a
 points/filled-contour display toggle,
 light and dark themes (Figure~\ref{fig:light}; light is the default), and
 nearest-point hover (peak wind, loss, coordinates, land/water, place name, and the
-active input parameters).
+active input parameters, including the storm's Holland $B$). A $B$-distribution
+control is retained for the live single-point profiler under the legacy design; in
+the constrained design $B$ is a \emph{direct} per-storm input, so the precomputed
+footprints use each storm's own $B$.
 
 \paragraph{One vector at a time.} The map always displays exactly \emph{one} input
 vector, and the input-vector slider is always live. An earlier build opened instead
-on a per-vertex field \emph{averaged over the 100 vectors}, with the slider
-disabled. That view was withdrawn: averaging across vectors mixes 100 different
+on a per-vertex field \emph{averaged over the vectors}, with the slider
+disabled. That view was withdrawn: averaging across vectors mixes the 200 different
 storms into a vertex value that no single storm ever produces, and it is not a
 quantity the analysis ever asks for. The outputs of interest are aggregates over the
 \emph{grid points} of a \emph{given} vector---above all $\mathrm{TLC}(i)$, the total
@@ -1435,9 +1854,9 @@ the response $Y$ of Sections~\ref{sec:sa}--\ref{sec:sobol} is, and always was, a
 per-vector aggregate over the grid points, so map and analysis now agree.
 
 \textbf{Right-clicking}
-a vertex exports a per-point loss-cost CSV for the current model/category/land-effect:
-$100$ rows (one per input vector) by $9$ columns---the six Form S-6 inputs (CP,
-$R_{\max}$, VT, WSP, CF, FFP), the peak wind at that vertex ($\mathrm{MaxWind\_mph}$),
+a vertex exports a per-point loss-cost CSV for the current model/land-effect:
+$200$ rows (one per input vector) by $9$ columns---the six inputs (CP,
+$R_{\max}$, VT, $B$, CF, FFP), the peak wind at that vertex ($\mathrm{MaxWind\_mph}$),
 and $\%\mathrm{LC}(i,x,y)=\mathrm{LC}(i,x,y)/\$100{,}000$
 (the loss cost at that vertex) and $\%\mathrm{TLC}(i)=\mathrm{TLC}(i)/(\text{total
 exposure})$, where $\mathrm{TLC}(i)=\sum_x\sum_y \mathrm{LC}(i,x,y)$ over all land
@@ -1640,6 +2059,11 @@ wind observations. \emph{Weather and Forecasting}, 11, 304--328.
 Tropical cyclone destructive potential by integrated kinetic energy.
 \emph{Bulletin of the American Meteorological Society}, 88(4), 513--526.
 
+\bibitem{powell2005} Powell, M.~D., Soukup, G., Cocke, S., Gulati, S.,
+Morisseau-Leroy, N., Hamid, S., Dorst, N., and Axe, L. (2005). State of Florida
+hurricane loss projection model: Atmospheric science component.
+\emph{Journal of Wind Engineering and Industrial Aerodynamics}, 93(8), 651--674.
+
 \bibitem{vickery} Vickery, P.~J., Wadhera, D., Powell, M.~D., and Chen, Y. (2009).
 A hurricane boundary layer and wind field model for use in engineering applications.
 \emph{Journal of Applied Meteorology and Climatology}, 48, 381--405.
@@ -1688,6 +2112,17 @@ Physics Communications}, 181, 259--270.
 
 \bibitem{jansen1999} Jansen, M.~J.~W. (1999). Analysis of variance designs for
 model output. \emph{Computer Physics Communications}, 117, 35--43.
+
+\bibitem{owen2014} Owen, A.~B. (2014). Sobol' indices and Shapley value.
+\emph{SIAM/ASA Journal on Uncertainty Quantification}, 2, 245--251.
+
+\bibitem{song2016} Song, E., Nelson, B.~L., and Staum, J. (2016). Shapley effects
+for global sensitivity analysis: theory and computation. \emph{SIAM/ASA Journal on
+Uncertainty Quantification}, 4, 1060--1083.
+
+\bibitem{broto2020} Broto, B., Bachoc, F., and Depecker, M. (2020). Variance
+reduction for estimation of Shapley effects and adaptation to unknown input
+distribution. \emph{SIAM/ASA Journal on Uncertainty Quantification}, 8, 693--716.
 \end{thebibliography}
 
 \end{document}

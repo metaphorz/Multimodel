@@ -11,11 +11,15 @@
    model + roughness toggle (what you see is what you analyze).
 */
 
-const SA_VARS = ["CP", "Rmax", "VT", "WSP", "CF", "FFP"];
-const SA_CATS = ["cat1", "cat3", "cat5"];
+// The constrained lumped design is a SINGLE population (no Cat 1/3/5); its input group
+// key is "all". GROUP centralizes that so a future re-introduction of categories is one
+// change. Declared here (analysis.js loads before viewer.js) so both files share it.
+const GROUP = "all";
+const SA_VARS = ["CP", "Rmax", "VT", "B", "CF", "FFP"];   // constrained design: B (Holland), not WSP
+const SA_CATS = [GROUP];   // lumped constrained design: one population
 const VAR_COLORS = {
   CP: "#3b82f6", Rmax: "#22c55e", VT: "#f59e0b",
-  WSP: "#111827", CF: "#ef4444", FFP: "#7c3aed",
+  B: "#111827", CF: "#ef4444", FFP: "#7c3aed",
 };
 // saMethod: which sensitivity method the Sensitivity panel shows ('src' | 'sobol')
 const analysisState = { mode: null, cache: null, saMethod: "src" };
@@ -251,7 +255,7 @@ function computeGridSensitivity(model, cat) {
 
 // ---- faithful EPR (Powell, Option 1): variance share from the UA sheets ---
 // EPR_i = Var(Y when only X_i varies) / Var(Y_SA), from powell_ua.json + powell.json.
-const UA_KEY = { CP: "cp", Rmax: "rmax", VT: "vt", WSP: "wsp", CF: "cf", FFP: "ffp" };
+const UA_KEY = { CP: "cp", Rmax: "rmax", VT: "vt", B: "b", CF: "cf", FFP: "ffp" };
 function variance(a) { const m = mean(a); return mean(a.map(v => (v - m) * (v - m))); }
 function faithfulEPR() {
   const ua = state.powellUa, pk = state.powell;
@@ -564,63 +568,50 @@ function drawChart(mode) {
   // (variance-based). Sobol' lives here, not under EPR: EPR is defined as SRC^2,
   // a regression quantity, so folding a variance-based total index into it would
   // conflate two different definitions of "share of variance".
-  if (!isEPR && analysisState.saMethod === "sobol") return drawSobol(p);
+  if (!isEPR && analysisState.saMethod === "shapley") return drawShapley(p);
 
-  const cats = [1, 3, 5];
-  // faithful EPR (wind-variance based) only for Powell + wind response; else SRC^2
+  // Single lumped population (no Cat 1/3/5): a BAR per input variable, not a line across
+  // categories. faithful EPR (wind-variance based) only for Powell + wind response; else SRC^2.
+  const grp = GROUP;
   const model = analysisState.cache.model;
   const epr = (isEPR && model === "powell" && responseVar() === "wind")
     ? faithfulEPR() : null;
 
-  // values per var per cat
-  const series = {};
-  let vmin = 0, vmax = 0;
-  for (const v of SA_VARS) {
-    series[v] = cats.map(c => {
-      const src = data["cat" + c].src[v];
-      const val = !isEPR ? src : (epr ? epr["cat" + c][v] : src * src * 100);
-      vmin = Math.min(vmin, val); vmax = Math.max(vmax, val);
-      return val;
-    });
-  }
-  if (isEPR) { vmin = 0; }
-  const pad = (vmax - vmin) * 0.1 || 1; vmax += pad; vmin -= (isEPR ? 0 : pad);
+  const vals = SA_VARS.map(v => {
+    const src = data[grp].src[v];
+    return !isEPR ? src : (epr ? epr[grp][v] : src * src * 100);
+  });
+  let vmin = Math.min(0, ...vals), vmax = Math.max(0, ...vals);
+  if (isEPR) vmin = 0;
+  const pad = (vmax - vmin) * 0.1 || 1; vmax += pad; if (!isEPR) vmin -= pad;
 
   const W = 440, H = 312, mL = 58, mR = 12, mT = 14, mB = 44;
-  const x = c => mL + (cats.indexOf(c) / (cats.length - 1)) * (W - mL - mR);
-  const yv = v => mT + (1 - (v - vmin) / (vmax - vmin)) * (H - mT - mB);
+  const n = SA_VARS.length;
+  const bw = ((W - mL - mR) / n) * 0.62;
+  const xc = i => mL + ((i + 0.5) / n) * (W - mL - mR);
+  const yv = val => mT + (1 - (val - vmin) / (vmax - vmin)) * (H - mT - mB);
 
   let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" >`;
-  // axes
   svg += `<line x1="${mL}" y1="${yv(0)}" x2="${W - mR}" y2="${yv(0)}" stroke="#94a3b8" stroke-dasharray="3 3"/>`;
   svg += `<line x1="${mL}" y1="${mT}" x2="${mL}" y2="${H - mB}" stroke="#64748b"/>`;
-  // y ticks
   for (let t = 0; t <= 4; t++) {
     const val = vmin + (t / 4) * (vmax - vmin);
     svg += `<text x="${mL - 5}" y="${yv(val) + 3}" text-anchor="end" class="ax">${val.toFixed(isEPR ? 0 : 2)}${isEPR ? "%" : ""}</text>`;
   }
-  // x labels
-  cats.forEach(c => svg += `<text x="${x(c)}" y="${H - mB + 16}" text-anchor="middle" class="ax">Cat ${c}</text>`);
-  // axis titles
+  SA_VARS.forEach((v, i) => {
+    const val = vals[i], y0 = yv(0), y1 = yv(val);
+    svg += `<rect x="${xc(i) - bw / 2}" y="${Math.min(y0, y1)}" width="${bw}" height="${Math.abs(y1 - y0)}" `
+         + `fill="${VAR_COLORS[v]}"><title>${v}: ${val.toFixed(isEPR ? 1 : 3)}${isEPR ? "%" : ""}</title></rect>`;
+    svg += `<text x="${xc(i)}" y="${H - mB + 16}" text-anchor="middle" class="ax">${v}</text>`;
+  });
   const yTitle = isEPR ? "EPR (% of output variance)" : "SRC (standardized regression coeff.)";
   const yMid = (mT + H - mB) / 2;
   svg += `<text x="13" y="${yMid}" text-anchor="middle" transform="rotate(-90 13 ${yMid})" class="ax">${yTitle}</text>`;
-  svg += `<text x="${(mL + W - mR) / 2}" y="${H - 5}" text-anchor="middle" class="ax">Hurricane category</text>`;
-  // lines + points
-  for (const v of SA_VARS) {
-    const pts = cats.map(c => `${x(c)},${yv(series[v][cats.indexOf(c)])}`).join(" ");
-    svg += `<polyline points="${pts}" fill="none" stroke="${VAR_COLORS[v]}" stroke-width="2"/>`;
-    cats.forEach((c, i) => {
-      const val = series[v][i];
-      svg += `<circle cx="${x(c)}" cy="${yv(val)}" r="3" fill="${VAR_COLORS[v]}"><title>${v} Cat${c}: ${val.toFixed(isEPR ? 1 : 3)}${isEPR ? "%" : ""}</title></circle>`;
-    });
-  }
+  svg += `<text x="${(mL + W - mR) / 2}" y="${H - 5}" text-anchor="middle" class="ax">Input variable</text>`;
   svg += `</svg>`;
 
-  // legend + r2
-  const legend = SA_VARS.map(v =>
-    `<span class="lgi"><span style="background:${VAR_COLORS[v]}"></span>${v}</span>`).join("");
-  const r2 = cats.map(c => `Cat${c} R²=${data["cat" + c].r2.toFixed(2)}`).join(" · ");
+  const legend = "";
+  const r2 = `GPR R²=${data[grp].r2.toFixed(2)}`;
   const title = isEPR ? "Uncertainty — EPR (% of output variance)"
                       : "Sensitivity — SRC (standardized regression coeff.)";
   p.title.textContent = title;
@@ -631,7 +622,9 @@ function drawChart(mode) {
     `<p class="note">${analysisState.cache.model} · metric: ${metricTxt}` +
     ` · land effect: ${analysisState.cache.land}<br>${r2}` +
     (isEPR ? (epr ? "<br>EPR = Var(Y|Xᵢ)/Var(Y) from UA sheets (faithful, marine)"
-                  : "<br>EPR ≈ SRC² (variance share)") : "") + "</p>";
+                  : "<br>EPR ≈ SRC² (variance share). The constrained n=200 design has no " +
+                    "one-at-a-time UA sheets, so faithful EPR isn't defined; see the " +
+                    "Shapley tab for the dependence-aware sensitivity.") : "") + "</p>";
   if (!isEPR) wireMethodTabs(p);
 }
 
@@ -639,7 +632,7 @@ function drawChart(mode) {
 function methodTabs() {
   const m = analysisState.saMethod || "src";
   const b = (id, lbl) => `<button class="sa-tab${m === id ? " on" : ""}" data-m="${id}">${lbl}</button>`;
-  return `<div class="sa-tabs">${b("src", "SRC")}${b("sobol", "Sobol'")}</div>`;
+  return `<div class="sa-tabs">${b("src", "SRC")}${b("shapley", "Shapley")}</div>`;
 }
 
 function wireMethodTabs(p) {
@@ -650,27 +643,28 @@ function wireMethodTabs(p) {
     }));
 }
 
-// ---- Sobol' indices: stacked bar per input, main effect + interaction -----
-// Sobol' (2001) variance decomposition, estimated on the GPR emulator following
-// Francom & Nachtsheim (2025): with only 100 model runs, direct estimation is
-// hopeless, but the emulator makes it cheap. S1 = main effect; ST = total effect;
-// ST - S1 = the share of variance the input carries only through interactions --
-// exactly what SRC, being first-order and linear, cannot see.
-function drawSobol(p) {
-  p.title.textContent = "Sensitivity — Sobol' indices (variance-based)";
-  const s = sobolBlock();
+// ---- Shapley effects: one bar per input, share of output variance --------
+// Shapley effects (Owen 2014; Song, Nelson & Staum 2016), estimated on the GPR emulator
+// with the given-data kNN estimator (Broto, Bachoc & Depecker 2020) over samples from the
+// constrained input JOINT. Unlike Sobol' (which assumes independence), Shapley effects
+// fairly allocate the variance shared among the CORRELATED inputs (CP-RMW, B-RMW) and sum
+// to exactly 1 -- the correct SA for this design. Sobol' is retained only as a reference.
+function drawShapley(p) {
+  p.title.textContent = "Sensitivity — Shapley effects (variance share)";
+  const s = shapleyBlock();
   if (!s) {
     p.body.innerHTML = methodTabs() +
-      "<p class='note'>Sobol' indices are computed on a GPR emulator fit to the " +
+      "<p class='note'>Shapley effects are computed on a GPR emulator fit to the " +
       "Powell (steady) footprint with Surface roughness on (with or without Kaplan–DeMaria " +
       "decay). Select that model and land effect, or use SRC, which runs live for any " +
       "configuration.</p>";
     wireMethodTabs(p);
     return;
   }
+  const share = s.shapley, se = s.se || [];
   const n = SA_VARS.length;
   const W = 440, H = 312, mL = 52, mR = 12, mT = 16, mB = 52;
-  const top = Math.max(1e-6, Math.max(...s.ST) * 1.25);
+  const top = Math.max(1e-6, Math.max(...share) * 1.25);
   const bw = (W - mL - mR) / n * 0.58;
   const xc = i => mL + (i + 0.5) * (W - mL - mR) / n;
   const yv = v => mT + (1 - v / top) * (H - mT - mB);
@@ -684,50 +678,36 @@ function drawSobol(p) {
     svg += `<text x="${mL - 5}" y="${yv(val) + 3}" text-anchor="end" class="ax">${val.toFixed(2)}</text>`;
   }
   SA_VARS.forEach((v, i) => {
-    const S1 = s.S1[i], ST = s.ST[i], gap = Math.max(0, ST - S1);
-    const c = VAR_COLORS[v];
-    // solid = main effect S1; hatched cap = interaction (ST - S1)
-    svg += `<rect x="${xc(i) - bw / 2}" y="${yv(S1)}" width="${bw}" height="${yv(0) - yv(S1)}" fill="${c}">` +
-           `<title>${v}  S₁ (main) = ${S1.toFixed(3)}</title></rect>`;
-    if (gap > 0) {
-      svg += `<rect x="${xc(i) - bw / 2}" y="${yv(ST)}" width="${bw}" height="${yv(S1) - yv(ST)}" ` +
-             `fill="${c}" opacity="0.32" stroke="${c}" stroke-dasharray="2 2">` +
-             `<title>${v}  interaction Sₜ−S₁ = ${gap.toFixed(3)}${s.resolved && s.resolved[i] ? " (resolved)" : " (within noise)"}</title></rect>`;
-    }
-    // Monte-Carlo error bar on the total index
-    const se = (s.se_ST && s.se_ST[i]) || 0;
-    if (se > 0) {
+    const val = Math.max(0, share[i]), c = VAR_COLORS[v];
+    svg += `<rect x="${xc(i) - bw / 2}" y="${yv(val)}" width="${bw}" height="${yv(0) - yv(val)}" fill="${c}">` +
+           `<title>${v}  Shapley = ${share[i].toFixed(3)}</title></rect>`;
+    const e = se[i] || 0;
+    if (e > 0) {
       const x0 = xc(i);
-      svg += `<line x1="${x0}" y1="${yv(ST - 2 * se)}" x2="${x0}" y2="${yv(ST + 2 * se)}" stroke="#334155" stroke-width="1"/>`;
-      svg += `<line x1="${x0 - 3}" y1="${yv(ST + 2 * se)}" x2="${x0 + 3}" y2="${yv(ST + 2 * se)}" stroke="#334155"/>`;
-      svg += `<line x1="${x0 - 3}" y1="${yv(ST - 2 * se)}" x2="${x0 + 3}" y2="${yv(ST - 2 * se)}" stroke="#334155"/>`;
+      svg += `<line x1="${x0}" y1="${yv(val - 2 * e)}" x2="${x0}" y2="${yv(val + 2 * e)}" stroke="#334155" stroke-width="1"/>`;
+      svg += `<line x1="${x0 - 3}" y1="${yv(val + 2 * e)}" x2="${x0 + 3}" y2="${yv(val + 2 * e)}" stroke="#334155"/>`;
+      svg += `<line x1="${x0 - 3}" y1="${yv(val - 2 * e)}" x2="${x0 + 3}" y2="${yv(val - 2 * e)}" stroke="#334155"/>`;
     }
     svg += `<text x="${xc(i)}" y="${H - mB + 16}" text-anchor="middle" class="ax">${v}</text>`;
   });
   const yMid = (mT + H - mB) / 2;
-  svg += `<text x="13" y="${yMid}" text-anchor="middle" transform="rotate(-90 13 ${yMid})" class="ax">Proportion of output variance</text>`;
+  svg += `<text x="13" y="${yMid}" text-anchor="middle" transform="rotate(-90 13 ${yMid})" class="ax">Share of output variance</text>`;
   svg += `<text x="${(mL + W - mR) / 2}" y="${H - 6}" text-anchor="middle" class="ax">Form S-6 input</text>`;
   svg += `</svg>`;
 
-  const inter = 1 - s.sum_S1;
-  const hits = SA_VARS.filter((_, i) => s.resolved && s.resolved[i]);
   const metricTxt = respLabel("long");
-  // The indices now track the land configuration (a separate emulator is fit for the
-  // Kaplan-DeMaria-decayed field), so name the config the numbers actually describe.
   const cfg = "Powell + roughness" +
     (document.getElementById("landDecay").checked ? " + Kaplan–DeMaria decay" : "");
+  const order = SA_VARS.map((v, i) => [v, share[i]]).sort((a, b) => b[1] - a[1]);
   p.body.innerHTML = methodTabs() + svg +
     `<div class="legend2">` +
-    `<span class="lgi"><span style="background:#64748b"></span>S₁ main effect</span>` +
-    `<span class="lgi"><span style="background:#64748b;opacity:.32"></span>Sₜ−S₁ interaction</span>` +
+    `<span class="lgi"><span style="background:#64748b"></span>Shapley share</span>` +
     `<span class="lgi">⌶ ±2 s.e.</span></div>` +
-    `<p class="note">GPR emulator · ${cfg} · Cat ${document.getElementById("category").value} · metric: ${metricTxt}` +
-    `<br>Σ S₁ = <b>${s.sum_S1.toFixed(3)}</b> — main effects alone explain ` +
-    `${(s.sum_S1 * 100).toFixed(1)}% of output variance; the remaining ` +
-    `<b>${(inter * 100).toFixed(1)}%</b> is interaction.` +
-    `<br>Interactions resolved above Monte-Carlo noise: ${hits.length ? "<b>" + hits.join(", ") + "</b>" : "none"}.` +
-    `<br>Sobol' (2001) on ${(s.n).toLocaleString()}×${s.reps} emulator samples; assumes independent inputs ` +
-    `(max |r| = ${s.max_input_corr.toFixed(2)}, ${s.max_input_corr_pair}).</p>`;
+    `<p class="note">GPR emulator · ${cfg} · metric: ${metricTxt}` +
+    `<br>Shapley effects partition the variance and sum to <b>${s.sum.toFixed(3)}</b> (= 1 by construction), ` +
+    `valid under the design's input dependence (max |r| = ${s.max_input_corr.toFixed(2)}, ${s.max_input_corr_pair}).` +
+    `<br>Top drivers: <b>${order.slice(0, 3).map(([v, x]) => `${v} ${x.toFixed(2)}`).join(", ")}</b>.` +
+    `<br>Given-data kNN estimator (Broto et&nbsp;al. 2020) on ${(s.n_joint).toLocaleString()} joint samples × ${s.reps} reps.</p>`;
   wireMethodTabs(p);
 }
 
@@ -739,7 +719,7 @@ function drawProfiler() {
   const p = panels["prof"];
   if (!p || p.el.style.display === "none") return;
   const model = document.getElementById("model").value;
-  const cat = "cat" + document.getElementById("category").value;
+  const cat = GROUP;
   p.title.textContent = "Interaction Profiler — metamodel";
   const mm = buildMetamodel(model, cat);
   if (!mm) {
@@ -766,7 +746,7 @@ function drawProfiler() {
 // those change. Holland/Willoughby only (Powell single-point uses the RSM path).
 const _v0Cache = new Map();
 function stormV0(model, rec, B) {
-  const key = [model, rec.CP, rec.FFP, rec.Rmax, rec.WSP, rec.CF].join(",");
+  const key = [model, rec.CP, rec.FFP, rec.Rmax, recB(rec), rec.CF].join(",");
   let v0 = _v0Cache.get(key);
   if (v0 === undefined) {
     const field = stormRelativeField(model, rec, B, 90, 81);
@@ -782,7 +762,7 @@ function stormV0(model, rec, B) {
 // single-point stays consistent with the footprint for any roughness×decay combo).
 // Shared by pointResponse and the accumulated-loss calibration.
 function pointSeriesAt(model, rec, pt) {
-  const B = quantileToB(rec.WSP);
+  const B = recB(rec);   // constrained design supplies B directly (Powell Eq. 7)
   const opts = {};
   if (document.getElementById("landRoughness").checked && state.roughness)
     opts.factor = state.roughness.factors[pt.idx];
@@ -884,7 +864,6 @@ function profilerPickPoint(idx) {
 function buildProfilerDOM() {
   const p = panels["prof"], mm = profilerState.mm;
   const model = document.getElementById("model").value;
-  const catN = document.getElementById("category").value;
   const metricTxt =
     responseVar() === "tlc" ? (profilerState.scale === "point" ? "%LC at point" : "%TLC") :
     responseVar() === "dwell" ? "hours V≥40 mph" :
@@ -919,7 +898,7 @@ function buildProfilerDOM() {
     : METAMODEL_LABEL[mm.type];
   const rng = pred.available ? ` · Y range [${pred.ymin.toFixed(2)}, ${pred.ymax.toFixed(2)}]` : "";
   const fit = scale === "point" ? "" : ` · R²=${mm.r2.toFixed(2)}${mm.note}`;
-  const head = `${srcTxt} · ${model} · Cat ${catN} · Y = ${metricTxt}${fit}${rng}`;
+  const head = `${srcTxt} · ${model} · n=200 · Y = ${metricTxt}${fit}${rng}`;
 
   if (!pred.available) {                              // point mode w/ Powell/KD or no point
     p.body.innerHTML = toggles + `<p class='note'>${pred.why}</p>`;
@@ -1075,10 +1054,20 @@ function sobolBanner() {
 function sobolBlock() {
   if (document.getElementById("model").value !== "powell") return null;
   if (!document.getElementById("landRoughness").checked) return null;
-  const e = mmEntry(responseVar(), "cat" + document.getElementById("category").value);
+  const e = mmEntry(responseVar(), GROUP);
   if (!e) return null;
   return document.getElementById("landDecay").checked
     ? (e.sobol_kd || null) : (e.sobol || null);
+}
+
+// Shapley block (PRIMARY sensitivity for the constrained/correlated design).
+function shapleyBlock() {
+  if (document.getElementById("model").value !== "powell") return null;
+  if (!document.getElementById("landRoughness").checked) return null;
+  const e = mmEntry(responseVar(), GROUP);
+  if (!e) return null;
+  return document.getElementById("landDecay").checked
+    ? (e.shapley_kd || null) : (e.shapley || null);
 }
 
 const S2_STRONG = 0.02;         // |S_ij| at which a pair reads as a real interaction
@@ -1141,8 +1130,7 @@ function drawCDF() {
   const p = panels["cdf"];
   if (!p || p.el.style.display === "none") return;
   const model = document.getElementById("model").value;
-  const cat = "cat" + document.getElementById("category").value;
-  const catN = document.getElementById("category").value;
+  const cat = GROUP;
   p.title.textContent = "Empirical CDF — %TLC";
   const recs = state.inputs[cat];
   const vals = recs.map((_, i) => pctTLC(computeWindFor(model, cat, i)));
@@ -1181,7 +1169,7 @@ function drawCDF() {
   svg += `</svg>`;
   const mu = mean(sorted), md = sorted[Math.floor(n / 2)];
   p.body.innerHTML = svg +
-    `<p class="note">${model} · Cat ${catN} · %TLC over ${n} input vectors` +
+    `<p class="note">${model} · %TLC over ${n} input vectors` +
     `<br>x = %TLC (loss cost, % of $68.2M exposure) · mean ${mu.toFixed(3)}% · median ${md.toFixed(3)}%</p>`;
 }
 
@@ -1190,8 +1178,7 @@ function drawCompare() {
   const p = panels["cmp"];
   if (!p || p.el.style.display === "none") return;
   const model = document.getElementById("model").value;
-  const cat = "cat" + document.getElementById("category").value;
-  const catN = document.getElementById("category").value;
+  const cat = GROUP;
   p.title.textContent = "Compare metamodels — Linear / GPR / NN";
   if (isPointOnlyResp()) {                     // footprint metamodels are peak-based
     p.body.innerHTML = "<p class='note'>Location-level metrics (dwell / dosage / IKE) are " +
@@ -1249,7 +1236,7 @@ function drawCompare() {
     `<div class="prof-grid">${gridHtml}</div>` +
     `<div class="legend2">${legend}</div>` +
     `<table class="cmp-tbl"><tr><th>metamodel</th><th>R²</th><th>5-fold CV R²</th></tr>${rows}</table>` +
-    `<p class="note">${model} · Cat ${catN} · Y = ${metricTxt} · curves at the input means` +
+    `<p class="note">${model} · n=200 · Y = ${metricTxt} · curves at the input means` +
     `${mms.gpr ? mms.gpr.note : (mms.mlp ? mms.mlp.note : "")}` +
     `<br>Overlaid partial-dependence: where Linear diverges from GPR/NN it is missing curvature/interaction.</p>`;
 }
@@ -1262,7 +1249,11 @@ function drawCompare() {
 const finState = {
   mode: "annual",                         // "annual" | "cond"
   scale: "domain",                        // "domain" (682-pt aggregate) | "point" (one vertex)
-  rates: { 1: 0.20, 3: 0.05, 5: 0.01 },   // events/yr by category (editable assumptions)
+  // Lumped constrained design: a SINGLE annual landfall rate for the population, replacing
+  // the old per-category rates. PLACEHOLDER default (0.35/yr ~ a landfalling hurricane in
+  // the study region every ~3 yr); editable in the financial panel, and the modeling org
+  // should set it from the regional climatology. AAL = lambda * mean loss over the 200.
+  lambda: 0.35,
   ded: 0,                                  // per-location deductible ($)
   lim: null,                               // per-location limit ($); null -> exposure
 };
@@ -1328,7 +1319,6 @@ function drawFinancial() {
   const p = panels["fin"];
   if (!p || p.el.style.display === "none") return;
   const model = document.getElementById("model").value;
-  const selCat = document.getElementById("category").value;
   p.title.textContent = "Loss EP / Financial";
 
   // single-point scale reuses the profiler's map-picked vertex
@@ -1347,10 +1337,9 @@ function drawFinancial() {
     `<button class="fin-tab${finState.mode === "cond" ? " active" : ""}" data-mode="cond">Conditional</button>` +
     `<button class="fin-tab${finState.mode === "annual" ? " active" : ""}" data-mode="annual">Annualized</button>` +
     `</div>` +
-    `<div class="fin-rates${finState.mode === "cond" ? " disabled" : ""}">Event rate /yr ` +
-    [1, 3, 5].map(c =>
-      `<label>Cat${c}<input type="number" step="0.01" min="0" data-rate="${c}" ` +
-      `value="${finState.rates[c]}" ${finState.mode === "cond" ? "disabled" : ""}/></label>`).join("") +
+    `<div class="fin-rates${finState.mode === "cond" ? " disabled" : ""}">Landfall rate /yr ` +
+    `<label><input type="number" step="0.01" min="0" data-lambda="1" ` +
+    `value="${finState.lambda}" ${finState.mode === "cond" ? "disabled" : ""}/></label>` +
     `</div>` +
     `<div class="fin-terms">` +
     `<label>Deductible $<input type="number" step="1000" min="0" data-fin="ded" value="${finState.ded}"/></label>` +
@@ -1368,29 +1357,25 @@ function drawFinancial() {
     return;
   }
 
-  // gather net-loss severity samples per category (domain aggregate, or one vertex)
-  const cats = [1, 3, 5];
-  const sev = {};
-  for (const c of cats) {
-    const s = finState.scale === "point"
-      ? pointLossSeries(model, "cat" + c, pPt.idx, finState.ded, finState.lim)
-      : tlcSeries(model, "cat" + c, finState.ded, finState.lim);
-    if (!s) {
-      p.body.innerHTML = controls +
-        "<p class='note'>Loss unavailable — vulnerability curve not loaded, or Powell " +
-        "Kaplan–DeMaria precompute pending. Try Holland/Willoughby or land effect None/Roughness.</p>";
-      wireFinControls(p);
-      return;
-    }
-    sev[c] = s;
+  // gather net-loss severity samples over the single 200-storm population
+  // (domain aggregate, or one vertex)
+  const sev = finState.scale === "point"
+    ? pointLossSeries(model, GROUP, pPt.idx, finState.ded, finState.lim)
+    : tlcSeries(model, GROUP, finState.ded, finState.lim);
+  if (!sev) {
+    p.body.innerHTML = controls +
+      "<p class='note'>Loss unavailable — vulnerability curve not loaded, or Powell " +
+      "Kaplan–DeMaria precompute pending. Try Holland/Willoughby or land effect None/Roughness.</p>";
+    wireFinControls(p);
+    return;
   }
 
   const W = 440, H = 270, mL = 64, mR = 14, mT = 14, mB = 46;
   let svg, metrics;
 
   if (finState.mode === "cond") {
-    // conditional severity exceedance for the selected category
-    const s = sev[+selCat].slice().sort((a, b) => a - b);
+    // conditional severity exceedance over the 200-storm population
+    const s = sev.slice().sort((a, b) => a - b);
     const n = s.length, lo = s[0], hi = s[n - 1], span = (hi - lo) || 1;
     const xpix = q => mL + q * (W - mL - mR);                  // exceedance prob 0..1
     const ypix = v => mT + (1 - (v - lo) / span) * (H - mT - mB);
@@ -1414,20 +1399,17 @@ function drawFinancial() {
     const mu = mean(s), sd = Math.sqrt(mean(s.map(v => (v - mu) ** 2)));
     const pct = q => s[Math.min(n - 1, Math.floor(q * n))];
     metrics =
-      `<table class="cmp-tbl"><tr><th>metric (Cat ${selCat}, per event)</th><th>value</th></tr>` +
+      `<table class="cmp-tbl"><tr><th>metric (per event)</th><th>value</th></tr>` +
       `<tr><td>mean</td><td>${fmtM(mu)}</td></tr>` +
       `<tr><td>std dev · CoV</td><td>${fmtM(sd)} · ${(sd / mu).toFixed(2)}</td></tr>` +
       `<tr><td>50th / 90th / 99th pct</td><td>${fmtM(pct(0.5))} · ${fmtM(pct(0.9))} · ${fmtM(pct(0.99))}</td></tr>` +
       `</table>`;
   } else {
-    // annualized OEP: λ(x) = Σ_c rate_c · P(L_c > x); each sample weight = rate_c/N_c
-    const wsamp = [];
-    let aal = 0;
-    for (const c of cats) {
-      const r = finState.rates[c] || 0, s = sev[c], n = s.length;
-      aal += r * mean(s);
-      s.forEach(loss => wsamp.push({ loss, w: r / n }));
-    }
+    // annualized OEP: λ(x) = λ · P(L > x); each of the 200 storms is one event
+    // sample with annual weight λ/N (single-population landfall rate)
+    const lam = finState.lambda || 0, n0 = sev.length;
+    const aal = lam * mean(sev);
+    const wsamp = sev.map(loss => ({ loss, w: lam / n0 }));
     const losses = wsamp.map(s => s.loss);
     const hi = Math.max(...losses), lo = 0, span = hi || 1;
     const totFreq = wsamp.reduce((a, s) => a + s.w, 0);
@@ -1489,8 +1471,8 @@ function drawFinancial() {
       `track-sampled model; read it as “given these 100 storms on this track.”`
     : "";
   p.body.innerHTML = controls + svg + metrics +
-    `<p class="note">${model} · severity over 100 input vectors / category · ${scaleTxt}` +
-    `${finState.mode === "annual" ? " · red dots = 50/100/250-yr losses" : " · Cat " + selCat}` +
+    `<p class="note">${model} · severity over 200 input vectors · ${scaleTxt}` +
+    `${finState.mode === "annual" ? " · red dots = 50/100/250-yr losses" : ""}` +
     `<br>Deductible/limit are per-location (under Census, a location is the cell ` +
     `aggregate). Terms are scoped to this panel; the map shows ground-up loss.${ptCaveat}</p>`;
   wireFinControls(p);
@@ -1506,9 +1488,9 @@ function wireFinControls(p) {
     b.addEventListener("click", () => { finState.mode = b.dataset.mode; drawFinancial(); }));
   p.body.querySelectorAll(".fin-tab[data-scale]").forEach(b =>
     b.addEventListener("click", () => { finState.scale = b.dataset.scale; drawFinancial(); }));
-  p.body.querySelectorAll("[data-rate]").forEach(inp =>
+  p.body.querySelectorAll("[data-lambda]").forEach(inp =>
     inp.addEventListener("change", () => {
-      finState.rates[+inp.dataset.rate] = Math.max(0, parseFloat(inp.value) || 0);
+      finState.lambda = Math.max(0, parseFloat(inp.value) || 0);
       drawFinancial(); refreshAALMap();
     }));
   p.body.querySelectorAll("[data-fin]").forEach(inp =>
@@ -1618,10 +1600,8 @@ function setupAnalysis() {
   // metamodel choice drives profiler/compare; no cache invalidation needed
   document.getElementById("metamodel").addEventListener("change",
     () => redrawOpenPanels(["prof", "cmp"]));
-  // category change affects the per-category panels. "src" is included because its
-  // Sobol' view is per-category (the SRC view itself spans all three categories).
-  document.getElementById("category").addEventListener("change",
-    () => redrawOpenPanels(["prof", "cmp", "cdf", "fin", "src"]));
+  // (category selector removed — the lumped constrained design is a single
+  // 200-storm population, so no per-category redraw trigger is needed.)
   // Exposure changes the loss response itself (a different emulator is fit per
   // exposure model), so every loss-driven panel must refit, not just recolour.
   document.getElementById("exposureModel").addEventListener("change", () => {
