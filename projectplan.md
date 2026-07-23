@@ -2542,9 +2542,22 @@ march writes BOTH the peak checkpoints AND all four products' frames (no second 
   any NEW design — one notebook, one run.** (The current 2-run split stands because peaks
   were already banked before frames were scoped this session.)
 
-### STILL REMAINING (frames)
-- Frames: retrieve + integrate when the CURRENT A100 frames run finishes (3/8 batches done,
-  75/200 storms, all .bin correct size).
+### Frames COMPLETE + integrated + committed (2026-07-22)
+- All 8 batches finished (200/200 storms). Retrieved dynamic_frames_constrained.zip from the
+  user's Downloads (macOS TCC blocked ~/Downloads; user moved it into the project), unzipped
+  800 .bin (200 x A/B/C/D, each 61320 B) + manifest into outputs/web/dyn_frames_constrained/.
+  Regenerated the manifest locally with the fixed script (file field -> dyn_frames_constrained/).
+- VERIFIED animation plays: headless test switched to Powell (dynamic), fetched a frame via the
+  design-suffixed path (61320 B), animPrecompute() built 73 frames, mid-passage ~112 mph, zero
+  console errors. The anim.js DESIGN_SUFFIX fix validated on real data.
+
+### COMMITTED + PUSHED (2026-07-22): 86b0063 on origin/sobol-indices
+Curated deliverable (858 files, 6527 insertions): viewer JS + index.html, pipeline (grid/
+dynamic/dynamic_batch --full/precompute_live --constrained/fit_metamodels/vendor), all
+constrained data JSONs, 800 frames + manifest, docs (FormS6 reframe + figures + Nutshell),
+3 Colab notebooks + bundle, holdout + design workbook, pubs/, projectplan. EXCLUDED per user:
+tests/, chris/, outputs/dynamic/ checkpoints, Windows helper files. Frames committed (deployed
+animation needs them). Pushed 10 commits (this + 9 prior-session) to GitHub.
 
 ### Server note: dev server left running on :8012 (tests/auto/server.pid). ./stop to halt.
 ### New tests this session: tests/auto/test_constrained_migration.py (viewer smoke) +
