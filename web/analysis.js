@@ -1218,7 +1218,11 @@ function drawCompare() {
         const raw = ref.slice(); raw[i] = xv;
         pts += `${xpix(xv).toFixed(1)},${ypix(clampY(mms[t].predict(raw))).toFixed(1)} `;
       }
-      svg += `<polyline points="${pts.trim()}" fill="none" stroke="${METAMODEL_COLOR[t]}" stroke-width="1.8"/>`;
+      // On this smooth simulator GPR and the neural net agree to ~1e-2, so their curves
+      // coincide; dash the last-drawn (neural net) so the green GPR beneath shows through
+      // the gaps -- where they overlap the curve reads as alternating green/orange.
+      const dash = t === "mlp" ? ` stroke-dasharray="5 4"` : "";
+      svg += `<polyline points="${pts.trim()}" fill="none" stroke="${METAMODEL_COLOR[t]}" stroke-width="1.8"${dash}/>`;
     });
     svg += `<text x="${mL}" y="${H - 3}" class="ax">${s.v}</text></svg>`;
     gridHtml += `<div class="prof-cell">${svg}</div>`;
@@ -1238,7 +1242,10 @@ function drawCompare() {
     `<table class="cmp-tbl"><tr><th>metamodel</th><th>R²</th><th>5-fold CV R²</th></tr>${rows}</table>` +
     `<p class="note">${model} · n=200 · Y = ${metricTxt} · curves at the input means` +
     `${mms.gpr ? mms.gpr.note : (mms.mlp ? mms.mlp.note : "")}` +
-    `<br>Overlaid partial-dependence: where Linear diverges from GPR/NN it is missing curvature/interaction.</p>`;
+    `<br>Overlaid partial-dependence: where Linear diverges from GPR/NN it is missing ` +
+    `curvature/interaction. The neural-net line is dashed; where it lies on the GPR line ` +
+    `(they agree to ~0.01 here) the green shows through, so a green/orange dashed curve ` +
+    `means GPR ≈ NN.</p>`;
 }
 
 // ---- Loss EP / Financial (actuarial layer) -------------------------------
